@@ -225,7 +225,8 @@ case "serve":
 
     let engine = SpoofEngine(spoofer: spoofer, gatewayIP: gatewayIP,
                              gatewayMAC: gatewayMAC, oneway: oneway)
-    let fwd = ForwardingControl(manage: !noForward)
+    // По умолчанию cut (forwarding off → цель теряет связь); --intercept — прозрачный MITM.
+    let fwd = ForwardingControl(cutMode: noForward || !hasFlag("--intercept"))
 
     let owner = optValue(["--owner"])
     guard let listenFD = makeListeningSocket(path: socketPath, owner: owner) else {

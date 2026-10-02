@@ -4,16 +4,27 @@ import ARPSpoofCore
 // MARK: - IP forwarding control
 
 final class ForwardingControl {
-    let manage: Bool
+    /// cut=true  → forwarding ВЫКЛ: трафик целей упирается в нас и обрывается (kill).
+    /// cut=false → forwarding ВКЛ при активных целях: прозрачный MITM (перехват).
+    var cutMode: Bool
     private(set) var enabledByUs = false
 
-    init(manage: Bool) { self.manage = manage }
+    init(cutMode: Bool) { self.cutMode = cutMode }
 
     var isOn: Bool { getIPForwarding() == 1 }
 
-    func enableIfNeeded() {
-        guard manage else { return }
-        if getIPForwarding() != 1, setIPForwarding(true) { enabledByUs = true }
+    /// Привести forwarding к нужному состоянию исходя из режима и наличия целей.
+    func apply(hasActive: Bool) {
+        if cutMode {
+            // В cut-режиме форвардинг должен быть выключен (даже если его включил
+            // кто-то до нас) — иначе цель не отвалится.
+            if getIPForwarding() == 1 { setIPForwarding(false) }
+            enabledByUs = false
+        } else if hasActive {
+            if getIPForwarding() != 1, setIPForwarding(true) { enabledByUs = true }
+        } else {
+            disableIfEnabled()
+        }
     }
 
     func disableIfEnabled() {
@@ -46,6 +57,7 @@ private func statusPayload(_ engine: SpoofEngine, _ fwd: ForwardingControl) -> [
         "event": "status",
         "targets": targets,
         "forwarding": fwd.isOn,
+        "cut": fwd.cutMode,
         "gateway": engine.gatewayIP.description,
     ]
 }
@@ -106,18 +118,31 @@ private func handle(_ cmd: [String: Any], client: Int32,
         print("cmd scan: имена отправлены (\(names.count))")
 
     case "start":
-        for m in macList(cmd) { engine.start(m) }
-        if !engine.active.isEmpty { fwd.enableIfNeeded() }
+        let macs = macList(cmd)
+        for m in macs { engine.start(m) }
+        fwd.apply(hasActive: !engine.active.isEmpty)
+        print("cmd start: запрошено \(macs.count), активно \(engine.active.count), cut=\(fwd.cutMode), fwd=\(fwd.isOn)")
         sendJSON(client, statusPayload(engine, fwd))
 
     case "stop":
-        for m in macList(cmd) { engine.stop(m) }
-        if engine.active.isEmpty { fwd.disableIfEnabled() }
+        let macs = macList(cmd)
+        for m in macs { engine.stop(m) }
+        fwd.apply(hasActive: !engine.active.isEmpty)
+        print("cmd stop: запрошено \(macs.count), активно \(engine.active.count)")
         sendJSON(client, statusPayload(engine, fwd))
 
     case "stopAll":
         engine.stopAll()
-        fwd.disableIfEnabled()
+        fwd.apply(hasActive: false)
+        print("cmd stopAll: активно \(engine.active.count)")
+        sendJSON(client, statusPayload(engine, fwd))
+
+    case "mode":
+        if let cut = cmd["cut"] as? Bool {
+            fwd.cutMode = cut
+            fwd.apply(hasActive: !engine.active.isEmpty)
+            print("cmd mode: cut=\(cut), fwd=\(fwd.isOn)")
+        }
         sendJSON(client, statusPayload(engine, fwd))
 
     case "status":

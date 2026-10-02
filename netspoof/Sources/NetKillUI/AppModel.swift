@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published var devices: [Device] = []
     @Published var selection = Set<MACAddress>()
     @Published var forwarding = false
+    @Published var cutMode = true    // true = Cut (обрыв), false = Intercept (MITM)
     @Published var gateway = ""
     @Published var connected = false
     @Published var scanning = false
@@ -98,6 +99,7 @@ final class AppModel: ObservableObject {
                 self?.connected = ok
                 if ok {
                     self?.statusLine = "подключено"
+                    self?.client.send(["cmd": "mode", "cut": self?.cutMode ?? true])
                     self?.client.send(["cmd": "status"])
                     self?.scan()
                 } else {
@@ -132,6 +134,7 @@ final class AppModel: ObservableObject {
         statusLine = "скан…"
         client.send(["cmd": "scan"])
     }
+
 
     func toggle(_ device: Device) {
         guard !device.isGateway, !device.isSelf else { return }
@@ -211,6 +214,7 @@ final class AppModel: ObservableObject {
             let targets = obj["targets"] as? [[String: String]] ?? []
             activeMacs = Set(targets.compactMap { MACAddress($0["mac"] ?? "") })
             forwarding = obj["forwarding"] as? Bool ?? false
+            if let c = obj["cut"] as? Bool { cutMode = c }
             if let gw = obj["gateway"] as? String { gateway = gw }
             for i in devices.indices { devices[i].active = activeMacs.contains(devices[i].mac) }
             updateStatusLine()
@@ -234,9 +238,8 @@ final class AppModel: ObservableObject {
 
     private func updateStatusLine() {
         let n = devices.filter { $0.active }.count
-        let fwd = forwarding ? "on" : "off"
         let gw = gateway.isEmpty ? "—" : gateway
-        statusLine = "\(n) target\(n == 1 ? "" : "s") · fwd:\(fwd) · gw \(gw)"
+        statusLine = "\(n) target\(n == 1 ? "" : "s") · gw \(gw)"
     }
 
 }
