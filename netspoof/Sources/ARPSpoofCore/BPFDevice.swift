@@ -74,8 +74,7 @@ public final class BPFDevice {
             // громко логируем с errno, чтобы проблема не была невидимой.
             if !warnedOnceAboutSend {
                 warnedOnceAboutSend = true
-                FileHandle.standardError.write(Data(
-                    "bpf: ошибка отправки кадра (errno=\(e)); дальнейшие сбои считаются молча\n".utf8))
+                Log.warn("bpf: ошибка отправки кадра (errno=\(e)); дальнейшие сбои считаются молча")
             }
             throw BPFError.writeFailed(e)
         }

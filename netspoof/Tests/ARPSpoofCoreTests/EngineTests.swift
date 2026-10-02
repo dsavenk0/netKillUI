@@ -279,3 +279,39 @@ private func senderFrame(mac: MACAddress, ip: IPv4Address) -> [UInt8] {
         #expect(m.bytes[0] & 0x02 == 0) // НЕ locally-administered — выглядит как вендор
     }
 }
+
+// MARK: - ForwardingControl (с инъекцией sysctl)
+
+@Test func forwardingCutForcesOff() {
+    var fwd = true   // кто-то включил форвардинг до нас
+    let fc = ForwardingControl(cutMode: true, read: { fwd }, write: { fwd = $0; return true })
+    fc.apply(hasActive: true)
+    #expect(fwd == false)          // cut → принудительно выключен
+    #expect(fc.isOn == false)
+}
+
+@Test func forwardingInterceptTogglesWithTargets() {
+    var fwd = false
+    let fc = ForwardingControl(cutMode: false, read: { fwd }, write: { fwd = $0; return true })
+    fc.apply(hasActive: true)      // intercept + есть цели → включаем
+    #expect(fwd == true)
+    #expect(fc.enabledByUs == true)
+    fc.apply(hasActive: false)     // целей нет → выключаем (мы же включали)
+    #expect(fwd == false)
+    #expect(fc.enabledByUs == false)
+}
+
+@Test func forwardingLeavesForeignForwardingAlone() {
+    var fwd = true                 // форвардинг включён НЕ нами
+    let fc = ForwardingControl(cutMode: false, read: { fwd }, write: { fwd = $0; return true })
+    fc.apply(hasActive: false)
+    #expect(fwd == true)           // чужой форвардинг не трогаем
+}
+
+@Test func forwardingSwitchToCutKillsEvenForeign() {
+    var fwd = true
+    let fc = ForwardingControl(cutMode: false, read: { fwd }, write: { fwd = $0; return true })
+    fc.cutMode = true
+    fc.apply(hasActive: true)
+    #expect(fwd == false)          // переключение в cut гасит даже чужой форвардинг
+}

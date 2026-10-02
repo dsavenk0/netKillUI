@@ -74,6 +74,12 @@ final class AppModel: ObservableObject {
     private var intentionalDisconnect = false
     private var reconnectAttempts = 0
 
+    // Heartbeat/watchdog: ловим ЗАВИСАНИЕ демона (сокет открыт, но ответов нет).
+    private var lastSeen = Date()
+    private var heartbeat: Timer?
+    private static let pingInterval: TimeInterval = 6
+    private static let unresponsiveAfter: TimeInterval = 18  // > самого долгого скана (~6с)
+
     // Кеш устройств + постоянный блок-лист, РАЗДЕЛЁННЫЕ ПО СЕТЯМ (ключ — MAC шлюза,
     // стабильный отпечаток сети): устройства и блокировки разных сетей не смешиваются.
     private var networkKey = ""
@@ -168,6 +174,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.connected = false
             self.stopAutoScan()
+            self.stopHeartbeat()
             if self.intentionalDisconnect {
                 self.statusLine = "движок отключён"
             } else if self.reconnectAttempts < Self.maxAutoReconnects {
@@ -212,6 +219,7 @@ final class AppModel: ObservableObject {
                     self?.client.send(["cmd": "status"])
                     self?.scan()
                     self?.startAutoScan()   // периодически обновляем online/offline
+                    self?.startHeartbeat()  // пинг + сторож на зависание демона
                     // armBlocked() — в обработчике ready, когда известна сеть (gatewayMac).
                 } else {
                     self?.statusLine = "движок не отвечает"
@@ -237,6 +245,7 @@ final class AppModel: ObservableObject {
         connected = false
         statusLine = "отключено"
         stopAutoScan()
+        stopHeartbeat()
     }
 
     // MARK: Команды
@@ -339,6 +348,7 @@ final class AppModel: ObservableObject {
 
     private func handle(_ obj: [String: Any]) {
         guard let event = obj["event"] as? String else { return }
+        lastSeen = Date()   // любое событие от демона = он жив и отвечает
         switch event {
         case "ready":
             gateway = obj["gateway"] as? String ?? gateway
@@ -498,6 +508,35 @@ final class AppModel: ObservableObject {
     private func stopAutoScan() {
         autoScanTimer?.invalidate()
         autoScanTimer = nil
+    }
+
+    // MARK: Heartbeat / watchdog (зависание демона)
+
+    private func startHeartbeat() {
+        lastSeen = Date()
+        heartbeat?.invalidate()
+        heartbeat = Timer.scheduledTimer(withTimeInterval: Self.pingInterval, repeats: true) { [weak self] _ in
+            self?.heartbeatTick()
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeat?.invalidate()
+        heartbeat = nil
+    }
+
+    /// Раз в pingInterval шлём лёгкий `status`-пинг и проверяем, отвечает ли демон.
+    /// Если ответов нет дольше unresponsiveAfter (с запасом больше самого долгого
+    /// скана) — демон завис: рвём сокет, и запускается тот же путь reconnect
+    /// (новый экземпляр при старте добьёт зависший через killOtherNetspoofInstances).
+    private func heartbeatTick() {
+        guard connected else { return }
+        if Date().timeIntervalSince(lastSeen) > Self.unresponsiveAfter {
+            statusLine = "движок завис — переподключаюсь…"
+            client.close()   // → onClose (intentionalDisconnect == false) → авто-reconnect
+            return
+        }
+        client.send(["cmd": "status"])   // пинг; демон ответит событием status
     }
 
 }

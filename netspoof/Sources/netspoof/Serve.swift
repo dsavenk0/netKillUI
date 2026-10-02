@@ -1,36 +1,7 @@
 import Foundation
 import ARPSpoofCore
 
-// MARK: - IP forwarding control
-
-final class ForwardingControl {
-    /// cut=true  → forwarding ВЫКЛ: трафик целей упирается в нас и обрывается (kill).
-    /// cut=false → forwarding ВКЛ при активных целях: прозрачный MITM (перехват).
-    var cutMode: Bool
-    private(set) var enabledByUs = false
-
-    init(cutMode: Bool) { self.cutMode = cutMode }
-
-    var isOn: Bool { getIPForwarding() == 1 }
-
-    /// Привести forwarding к нужному состоянию исходя из режима и наличия целей.
-    func apply(hasActive: Bool) {
-        if cutMode {
-            // В cut-режиме форвардинг должен быть выключен (даже если его включил
-            // кто-то до нас) — иначе цель не отвалится.
-            if getIPForwarding() == 1 { setIPForwarding(false) }
-            enabledByUs = false
-        } else if hasActive {
-            if getIPForwarding() != 1, setIPForwarding(true) { enabledByUs = true }
-        } else {
-            disableIfEnabled()
-        }
-    }
-
-    func disableIfEnabled() {
-        if enabledByUs { setIPForwarding(false); enabledByUs = false }
-    }
-}
+// ForwardingControl вынесен в ARPSpoofCore (с инъекцией sysctl для тестов).
 
 /// Изменяемое состояние демона на время сессии клиента.
 final class ServeState {
@@ -112,7 +83,7 @@ private func handle(_ cmd: [String: Any], client: Int32,
     switch c {
     case "scan":
         // Ниндзя — пассивно (слушаем, 0 исходящих кадров); иначе активный ARP-свип.
-        print("cmd scan: \(state.ninja ? "пассивно" : "активно")…")
+        Log.info("cmd scan: \(state.ninja ? "пассивно" : "активно")…")
         let hosts = state.ninja ? engine.spoofer.discoverHostsPassive()
                                 : engine.spoofer.discoverHosts()
         for h in hosts { engine.observe(h) }
@@ -120,39 +91,39 @@ private func handle(_ cmd: [String: Any], client: Int32,
             ["ip": h.ip.description, "mac": h.mac.description, "vendor": h.vendor]
         }
         sendJSON(client, ["event": "devices", "list": list])
-        print("cmd scan: \(hosts.count) хостов, резолвлю имена…")
+        Log.info("cmd scan: \(hosts.count) хостов, резолвлю имена…")
         let names = engine.spoofer.resolveNames(for: hosts)
         if !names.isEmpty {
             let pairs = names.map { ["mac": $0.key.description, "name": $0.value] }
             sendJSON(client, ["event": "deviceNames", "names": pairs])
         }
-        print("cmd scan: имена отправлены (\(names.count))")
+        Log.info("cmd scan: имена отправлены (\(names.count))")
 
     case "start":
         let macs = macList(cmd)
         for m in macs { engine.start(m) }
         fwd.apply(hasActive: !engine.active.isEmpty)
-        print("cmd start: запрошено \(macs.count), активно \(engine.active.count), cut=\(fwd.cutMode), fwd=\(fwd.isOn)")
+        Log.info("cmd start: запрошено \(macs.count), активно \(engine.active.count), cut=\(fwd.cutMode), fwd=\(fwd.isOn)")
         sendJSON(client, statusPayload(engine, fwd, state))
 
     case "stop":
         let macs = macList(cmd)
         for m in macs { engine.stop(m) }
         fwd.apply(hasActive: !engine.active.isEmpty)
-        print("cmd stop: запрошено \(macs.count), активно \(engine.active.count)")
+        Log.info("cmd stop: запрошено \(macs.count), активно \(engine.active.count)")
         sendJSON(client, statusPayload(engine, fwd, state))
 
     case "stopAll":
         engine.stopAll()
         fwd.apply(hasActive: false)
-        print("cmd stopAll: активно \(engine.active.count)")
+        Log.info("cmd stopAll: активно \(engine.active.count)")
         sendJSON(client, statusPayload(engine, fwd, state))
 
     case "mode":
         if let cut = cmd["cut"] as? Bool {
             fwd.cutMode = cut
             fwd.apply(hasActive: !engine.active.isEmpty)
-            print("cmd mode: cut=\(cut), fwd=\(fwd.isOn)")
+            Log.info("cmd mode: cut=\(cut), fwd=\(fwd.isOn)")
         }
         sendJSON(client, statusPayload(engine, fwd, state))
 
@@ -164,7 +135,7 @@ private func handle(_ cmd: [String: Any], client: Int32,
             // oneway + редкая переотправка делали cut вялым (жертва восстанавливала
             // ARP между тиками). ARP-poisoning детектируется в любом случае, поэтому
             // режем эффективно (two-way), лишь умеренно снижая темп переотправки.
-            print("cmd ninja: \(on)")
+            Log.info("cmd ninja: \(on)")
         }
         sendJSON(client, statusPayload(engine, fwd, state))
 
@@ -181,7 +152,7 @@ private func handle(_ cmd: [String: Any], client: Int32,
                 fwd.cutMode = false
                 for m in interest { engine.start(m) }
                 fwd.apply(hasActive: !engine.active.isEmpty)   // forwarding ON
-                print("cmd monitor: ON, устройств \(interest.count), fwd=\(fwd.isOn)")
+                Log.info("cmd monitor: ON, устройств \(interest.count), fwd=\(fwd.isOn)")
             } else {
                 sendJSON(client, ["event": "error", "message": "не удалось открыть BPF для монитора"])
             }
@@ -191,7 +162,7 @@ private func handle(_ cmd: [String: Any], client: Int32,
             engine.stopAll()
             fwd.cutMode = true
             fwd.apply(hasActive: false)
-            print("cmd monitor: OFF")
+            Log.info("cmd monitor: OFF")
         }
         sendJSON(client, statusPayload(engine, fwd, state))
 
@@ -218,7 +189,7 @@ func runServe(info: InterfaceInfo, engine: SpoofEngine, bpf: BPFDevice,
 
         let client = accept(listenFD, nil, nil)
         if client < 0 { continue }
-        print("client: подключился")
+        Log.info("client: подключился")
 
         sendJSON(client, [
             "event": "ready",
@@ -241,12 +212,12 @@ func runServe(info: InterfaceInfo, engine: SpoofEngine, bpf: BPFDevice,
                 ARPPin.pin(ip: engine.gatewayIP, mac: engine.gatewayMAC)
                 gatewayPinned = true
                 defended = true
-                print("🛡 защита: закрепил шлюз \(engine.gatewayIP) → \(engine.gatewayMAC) статически")
+                Log.info("🛡 защита: закрепил шлюз \(engine.gatewayIP) → \(engine.gatewayMAC) статически")
             }
             sendJSON(client, ["event": "alert", "kind": "arp-spoof",
                               "mac": attacker.description, "ip": ip.description,
                               "defended": defended])
-            print("⚠ ARP-спуфер: \(attacker) выдаёт себя за \(ip)")
+            Log.warn("ARP-спуфер: \(attacker) выдаёт себя за \(ip)")
         }
 
         var buf = [UInt8]()
@@ -311,7 +282,7 @@ func runServe(info: InterfaceInfo, engine: SpoofEngine, bpf: BPFDevice,
         }
 
         // Watchdog: клиент ушёл — восстановить кэши и выключить forwarding.
-        print("client: отключился — восстанавливаю ARP-кэши")
+        Log.info("client: отключился — восстанавливаю ARP-кэши")
         engine.onSpoofDetected = nil
         if gatewayPinned {
             ARPPin.unpin(ip: engine.gatewayIP)   // вернуть динамический ARP для шлюза

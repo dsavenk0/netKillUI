@@ -85,21 +85,21 @@ if geteuid() != 0 {
 // реассоциации), поэтому там даже не пытаемся — иначе зря рвём связь на каждом старте.
 if command == "serve", hasFlag("--mask-mac") {
     if MACMasker.isWiFi(iface) {
-        print("mask: интерфейс \(iface) — Wi-Fi; на встроенном Wi-Fi (Apple Silicon) смена "
+        Log.warn("mask: интерфейс \(iface) — Wi-Fi; на встроенном Wi-Fi (Apple Silicon) смена "
             + "MAC не закрепляется. Пропускаю (связь не дёргаю), работаю с реальным MAC. "
             + "Для маскировки используйте USB-Ethernet.")
     } else if let orig = MACMasker.current(iface) {
         let masked = MACMasker.plausible()
-        print("mask: меняю MAC \(orig) → \(masked)…")
+        Log.info("mask: меняю MAC \(orig) → \(masked)…")
         if MACMasker.apply(iface, masked) {
             macRestore = (iface, orig)
-            print("mask: OK — MAC закреплён (\(masked))")
+            Log.info("mask: OK — MAC закреплён (\(masked))")
         } else {
             let now = MACMasker.current(iface).map { "\($0)" } ?? "?"
-            print("mask: НЕ применился (ОС откатила) — работаю с реальным MAC \(now)")
+            Log.warn("mask: НЕ применился (ОС откатила) — работаю с реальным MAC \(now)")
         }
     } else {
-        print("mask: не удалось прочитать текущий MAC — маскировка пропущена")
+        Log.warn("mask: не удалось прочитать текущий MAC — маскировка пропущена")
     }
 }
 
@@ -254,7 +254,7 @@ case "serve":
 
     let gatewayMAC: MACAddress
     do {
-        print("serve: разрешаю MAC шлюза \(gatewayIP)...")
+        Log.info("serve: разрешаю MAC шлюза \(gatewayIP)...")
         gatewayMAC = try spoofer.resolveMAC(ip: gatewayIP)
     } catch {
         fail("\(error)")
@@ -272,8 +272,7 @@ case "serve":
     signal(SIGINT, handleSignal)
     signal(SIGTERM, handleSignal)
 
-    print("serve: слушаю \(socketPath) · iface \(iface) · gw \(gatewayIP) (\(gatewayMAC))")
-    print("serve: протокол — JSON построчно: {\"cmd\":\"scan|start|stop|stopAll|status\"}")
+    Log.info("serve: слушаю \(socketPath) · iface \(iface) · gw \(gatewayIP) (\(gatewayMAC))")
     let state = ServeState()
     state.masked = (macRestore != nil)
     runServe(info: info, engine: engine, bpf: bpf,
@@ -284,13 +283,13 @@ case "serve":
     close(listenFD)
     unlink(socketPath)
     if let r = macRestore {
-        print("mask: восстанавливаю оригинальный MAC \(r.mac)…")
+        Log.info("mask: восстанавливаю оригинальный MAC \(r.mac)…")
         _ = MACMasker.apply(r.iface, r.mac)
     }
     if bpf.sendFailures > 0 {
-        print("serve: сбоев отправки BPF за сессию: \(bpf.sendFailures)")
+        Log.warn("serve: сбоев отправки BPF за сессию: \(bpf.sendFailures)")
     }
-    print("\nserve: остановлен, ARP-кэши восстановлены.")
+    Log.info("serve: остановлен, ARP-кэши восстановлены.")
 
 default:
     usage()

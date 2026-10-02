@@ -66,6 +66,9 @@ final class SocketClient {
     }
 
     func close() {
-        if fd >= 0 { Darwin.close(fd); fd = -1 }
+        // shutdown() будит заблокированный read() (вернёт EOF) — иначе при
+        // зависшем демоне (данных нет) цикл чтения мог бы не завершиться и
+        // onClose не сработал бы.
+        if fd >= 0 { shutdown(fd, SHUT_RDWR); Darwin.close(fd); fd = -1 }
     }
 }
