@@ -62,6 +62,14 @@ echo "▸ Ad-hoc подпись…"
 codesign --force --deep --sign - "$APP"
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
+# Обновить кэш иконок: Dock читает бандл заново, а Finder/Launchpad держат
+# старую иконку в Launch Services, пока не поменяется mtime бандла и он не
+# будет перерегистрирован. Иначе после пересборки иконка «пропадает».
+echo "▸ Обновляю кэш иконок…"
+touch "$APP"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
+
 echo ""
 echo "✓ Готово: $APP"
 echo "  Перетащи в /Applications или запусти двойным кликом."

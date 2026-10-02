@@ -6,8 +6,21 @@ setbuf(stdout, nil)  // живой лог без буферизации (serve �
 // Глобальный флаг остановки — выставляется из обработчика сигнала.
 var gStop: sig_atomic_t = 0
 
+// Если маскировали MAC — что вернуть при выходе (интерфейс, оригинальный MAC).
+var macRestore: (iface: String, mac: MACAddress)? = nil
+
 func handleSignal(_ s: Int32) {
     gStop = 1
+}
+
+// Запрос интерфейса с ожиданием: после смены MAC (down/up) Wi-Fi пере-
+// ассоциируется и IP возвращается не сразу. Ждём до ~12с.
+func queryInterfaceWaiting(_ iface: String, attempts: Int = 24) throws -> InterfaceInfo {
+    for i in 0..<attempts {
+        if let info = try? queryInterface(iface) { return info }
+        if i < attempts - 1 { usleep(500_000) }
+    }
+    return try queryInterface(iface)  // финальная попытка пробросит ошибку
 }
 
 func fail(_ msg: String) -> Never {
@@ -66,9 +79,33 @@ if geteuid() != 0 {
     fail("нужны права root — запускайте через sudo")
 }
 
+// MAC-mask (--mask-mac): до запроса интерфейса подменяем свой MAC, чтобы скрыть
+// личность устройства. Проверяем, что реально закрепилось; при выходе вернём.
+// На встроенном Wi-Fi Apple Silicon смена MAC не держится (драйвер откатывает при
+// реассоциации), поэтому там даже не пытаемся — иначе зря рвём связь на каждом старте.
+if command == "serve", hasFlag("--mask-mac") {
+    if MACMasker.isWiFi(iface) {
+        print("mask: интерфейс \(iface) — Wi-Fi; на встроенном Wi-Fi (Apple Silicon) смена "
+            + "MAC не закрепляется. Пропускаю (связь не дёргаю), работаю с реальным MAC. "
+            + "Для маскировки используйте USB-Ethernet.")
+    } else if let orig = MACMasker.current(iface) {
+        let masked = MACMasker.plausible()
+        print("mask: меняю MAC \(orig) → \(masked)…")
+        if MACMasker.apply(iface, masked) {
+            macRestore = (iface, orig)
+            print("mask: OK — MAC закреплён (\(masked))")
+        } else {
+            let now = MACMasker.current(iface).map { "\($0)" } ?? "?"
+            print("mask: НЕ применился (ОС откатила) — работаю с реальным MAC \(now)")
+        }
+    } else {
+        print("mask: не удалось прочитать текущий MAC — маскировка пропущена")
+    }
+}
+
 let info: InterfaceInfo
 do {
-    info = try queryInterface(iface)
+    info = try queryInterfaceWaiting(iface)
 } catch {
     fail("\(error)")
 }
@@ -237,13 +274,19 @@ case "serve":
 
     print("serve: слушаю \(socketPath) · iface \(iface) · gw \(gatewayIP) (\(gatewayMAC))")
     print("serve: протокол — JSON построчно: {\"cmd\":\"scan|start|stop|stopAll|status\"}")
+    let state = ServeState()
+    state.masked = (macRestore != nil)
     runServe(info: info, engine: engine, bpf: bpf,
-             listenFD: listenFD, intervalMS: intervalMS, fwd: fwd)
+             listenFD: listenFD, intervalMS: intervalMS, fwd: fwd, state: state)
 
     engine.stopAll()
     fwd.disableIfEnabled()
     close(listenFD)
     unlink(socketPath)
+    if let r = macRestore {
+        print("mask: восстанавливаю оригинальный MAC \(r.mac)…")
+        _ = MACMasker.apply(r.iface, r.mac)
+    }
     print("\nserve: остановлен, ARP-кэши восстановлены.")
 
 default:

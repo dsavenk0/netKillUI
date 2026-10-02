@@ -1,4 +1,5 @@
 import Foundation
+import CBPF
 
 public enum SpoofError: Error, CustomStringConvertible {
     case resolveFailed(IPv4Address)
@@ -46,6 +47,43 @@ public final class ARPSpoofer {
             if Date().timeIntervalSince(lastProbe) > 1.0 { probe(); lastProbe = Date() }
         }
         return found.sorted { $0.key.hostOrder < $1.key.hostOrder }
+            .map { Host(ip: $0.key, mac: $0.value) }
+    }
+
+    /// Пассивное («ниндзя») обнаружение: НИ ОДНОГО исходящего кадра. Засеваем
+    /// ARP-кэшем ОС (система уже знает соседей — находит и молчащих), затем
+    /// дослушиваем широковещательный ARP-трафик. ARP-свипом не светим.
+    public func discoverHostsPassive(duration: TimeInterval = 6.0) -> [Host] {
+        var found = [IPv4Address: MACAddress]()
+        for h in arpCacheHosts() { found[h.ip] = h.mac }  // пассивный засев
+        let deadline = Date().addingTimeInterval(duration)
+        while Date() < deadline {
+            for f in bpf.receive(timeoutMS: 250) {
+                if let (mac, ip) = parseARPSender(f), mac != iface.mac {
+                    found[ip] = mac
+                }
+            }
+        }
+        return found.sorted { $0.key.hostOrder < $1.key.hostOrder }
+            .map { Host(ip: $0.key, mac: $0.value) }
+    }
+
+    /// Пассивно прочитать ARP-кэш ОС: соседи, с которыми система уже общалась.
+    /// Ни одного пакета не отправляется. Свои/служебные записи отфильтрованы.
+    public func arpCacheHosts() -> [Host] {
+        var buf = [cbpf_arp_entry](repeating: cbpf_arp_entry(), count: 1024)
+        let n = Int(cbpf_arp_cache(&buf, Int32(buf.count)))
+        guard n > 0 else { return [] }
+        var out = [IPv4Address: MACAddress]()
+        for i in 0..<n {
+            let e = buf[i]
+            let ip = IPv4Address(bytes: [e.ip.0, e.ip.1, e.ip.2, e.ip.3])
+            let mac = MACAddress(bytes: [e.mac.0, e.mac.1, e.mac.2, e.mac.3, e.mac.4, e.mac.5])
+            if mac == iface.mac || ip == iface.ip { continue }       // не мы
+            if mac == .broadcast || mac == .zero { continue }        // служебное
+            out[ip] = mac
+        }
+        return out.sorted { $0.key.hostOrder < $1.key.hostOrder }
             .map { Host(ip: $0.key, mac: $0.value) }
     }
 

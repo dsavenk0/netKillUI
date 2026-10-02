@@ -7,10 +7,17 @@ public final class SpoofEngine {
     public let spoofer: ARPSpoofer
     public let gatewayIP: IPv4Address
     public let gatewayMAC: MACAddress
-    public let oneway: Bool
+    public var oneway: Bool
+    /// В пассивном (ниндзя) режиме не рассылаем ARP-свип: цели и их появление
+    /// ловим только по пассивно пришедшему ARP.
+    public var passiveOnly = false
 
     public private(set) var bindings: [MACAddress: IPv4Address] = [:]
     public private(set) var active: Set<MACAddress> = []
+
+    /// Вызывается, когда замечен ЧУЖОЙ ARP-спуфер: (атакующий MAC, подменяемый IP).
+    public var onSpoofDetected: ((MACAddress, IPv4Address) -> Void)?
+    private var reportedSpoofers = Set<MACAddress>()
 
     public init(spoofer: ARPSpoofer, gatewayIP: IPv4Address, gatewayMAC: MACAddress, oneway: Bool) {
         self.spoofer = spoofer
@@ -24,6 +31,18 @@ public final class SpoofEngine {
     @discardableResult
     public func ingest(_ frame: [UInt8]) -> MACAddress? {
         guard let (m, ip) = parseARPSender(frame) else { return nil }
+
+        // Защита: кто-то ДРУГОЙ (не мы) выдаёт senderIP, прочно связанный у нас с
+        // другим MAC — за шлюз или за нас → чужой ARP-спуфер в сети.
+        if m != spoofer.iface.mac, !reportedSpoofers.contains(m) {
+            let impersonatesGateway = (ip == gatewayIP && m != gatewayMAC)
+            let impersonatesUs = (ip == spoofer.iface.ip)
+            if impersonatesGateway || impersonatesUs {
+                reportedSpoofers.insert(m)
+                onSpoofDetected?(m, ip)
+            }
+        }
+
         if bindings[m] != ip { bindings[m] = ip; return m }
         return nil
     }
@@ -38,7 +57,9 @@ public final class SpoofEngine {
         // отрезать себе сеть/маршрут. Эти цели игнорируются молча.
         guard mac != spoofer.iface.mac, mac != gatewayMAC else { return }
         active.insert(mac)
-        if bindings[mac] == nil { spoofer.probeSubnet() } // IP придёт в ingest()
+        // IP неизвестен (например, цель сейчас оффлайн — блок-на-появление):
+        // в активном режиме разово подтолкнём ARP, в ниндзя ждём пассивно.
+        if bindings[mac] == nil, !passiveOnly { spoofer.probeSubnet() }
     }
 
     public func stop(_ mac: MACAddress) {
@@ -57,18 +78,15 @@ public final class SpoofEngine {
                         gatewayIP: gatewayIP, gatewayMAC: gatewayMAC, times: 3)
     }
 
-    /// Один тик: отравить все активные цели с известным IP; для неизвестных —
-    /// спровоцировать ARP, чтобы их IP прилетел в ingest().
+    /// Один тик: отравить все активные цели с известным IP. Для целей без
+    /// известного IP (оффлайн — блок-на-появление) НИЧЕГО не шлём и НЕ зондируем:
+    /// их появление поймает ingest() по пассивно пришедшему ARP, и следующий тик
+    /// начнёт травлю. Так блокировка срабатывает мгновенно и без шума.
     public func tick() {
-        var needProbe = false
         for mac in active {
-            if let ip = bindings[mac] {
-                spoofer.poisonOnce(victimIP: ip, victimMAC: mac,
-                                   gatewayIP: gatewayIP, gatewayMAC: gatewayMAC, oneway: oneway)
-            } else {
-                needProbe = true
-            }
+            guard let ip = bindings[mac] else { continue }
+            spoofer.poisonOnce(victimIP: ip, victimMAC: mac,
+                               gatewayIP: gatewayIP, gatewayMAC: gatewayMAC, oneway: oneway)
         }
-        if needProbe { spoofer.probeSubnet() }
     }
 }

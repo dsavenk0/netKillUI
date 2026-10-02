@@ -12,11 +12,13 @@ enum Elevator {
     /// Запустить serve в фоне как root. Возвращает nil при успехе или текст
     /// ошибки (например, отмену диалога пароля).
     @discardableResult
-    static func launchServe(binary: String, iface: String, socketPath: String, owner: String) -> String? {
+    static func launchServe(binary: String, iface: String, socketPath: String, owner: String,
+                            maskMAC: Bool = false) -> String? {
         // Демон сам чистит прежние экземпляры при старте (killOtherNetspoofInstances,
         // по PID — без pkill и само-ловушек). Без nohup (под osascript нет tty) —
         // демон сам игнорирует SIGHUP; stdio в файл/-devnull, & — в фон.
-        let cmd = "'\(binary)' serve -i \(iface) --socket '\(socketPath)' --owner \(owner)"
+        let maskFlag = maskMAC ? " --mask-mac" : ""
+        let cmd = "'\(binary)' serve -i \(iface) --socket '\(socketPath)' --owner \(owner)\(maskFlag)"
             + " </dev/null >/tmp/netkillui-serve.log 2>&1 &"
         let apple = "do shell script \"\(cmd)\" with administrator privileges"
 
