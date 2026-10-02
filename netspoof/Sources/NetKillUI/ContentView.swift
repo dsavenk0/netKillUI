@@ -7,6 +7,37 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             TitleBar()
+            switch model.activeScreen {
+            case .home:     HomeLauncher()
+            case .devices:  DevicesScreen()
+            case .defense:  DefenseScreen()
+            case .settings: SettingsScreen()
+            }
+        }
+        .background(Color.nkBG)
+        .foregroundColor(.nkFG)
+        .preferredColorScheme(model.darkTheme ? .dark : .light)
+        .onAppear { model.showConsentOnLaunch() }
+        .sheet(isPresented: $model.showConsent) {
+            ConsentView().environmentObject(model)
+        }
+        .alert("Ошибка", isPresented: Binding(
+            get: { model.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+    }
+}
+
+// MARK: - Devices screen (бывший главный экран)
+
+private struct DevicesScreen: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        VStack(spacing: 0) {
             Toolbar()
             Divider().overlay(Color.nkLine)
             if let alert = model.alertBanner {
@@ -34,21 +65,99 @@ struct ContentView: View {
             DeviceList()
             StatusBar()
         }
+    }
+}
+
+
+// MARK: - Defense / Settings screens
+
+private struct DefenseScreen: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScreenHeader(icon: "shield.lefthalf.filled", title: "Self-defense")
+            if let alert = model.alertBanner {
+                AlertBanner(text: alert) { model.alertBanner = nil }
+                Divider().overlay(Color.nkLine)
+            }
+            VStack(alignment: .leading, spacing: 14) {
+                statusRow("Детект чужих ARP-спуферов",
+                          model.connected ? "активен" : "нужен запуск движка",
+                          ok: model.connected)
+                statusRow("Автозакрепление шлюза при атаке", "включено", ok: true)
+                statusRow("Шлюз", model.gateway.isEmpty ? "—" : model.gateway, ok: !model.gateway.isEmpty)
+
+                Text("Если кто-то в сети выдаёт себя за твой шлюз, netKillUI покажет "
+                     + "предупреждение и статически закрепит настоящий MAC шлюза в твоём "
+                     + "ARP-кэше — тебя нельзя будет увести. При выходе закрепление снимается.")
+                    .font(.system(size: 12.5)).foregroundColor(.nkDim)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+            .padding(20)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.nkBG)
-        .foregroundColor(.nkFG)
-        .preferredColorScheme(model.darkTheme ? .dark : .light)
-        .onAppear { model.showConsentOnLaunch() }
-        .sheet(isPresented: $model.showConsent) {
-            ConsentView().environmentObject(model)
+    }
+
+    private func statusRow(_ title: String, _ value: String, ok: Bool) -> some View {
+        HStack {
+            Text(title).font(.system(size: 13)).foregroundColor(.nkFG)
+            Spacer()
+            Text(value).font(.mono(11.5)).foregroundColor(ok ? .nkAccent : .nkDim)
         }
-        .alert("Ошибка", isPresented: Binding(
-            get: { model.errorMessage != nil },
-            set: { if !$0 { model.errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.errorMessage ?? "")
+    }
+}
+
+private struct SettingsScreen: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScreenHeader(icon: "gearshape.fill", title: "Settings")
+            VStack(alignment: .leading, spacing: 16) {
+                Toggle(isOn: Binding(get: { model.darkTheme },
+                                     set: { _ in model.toggleTheme() })) {
+                    Text("Тёмная тема").font(.system(size: 13)).foregroundColor(.nkFG)
+                }
+                if model.connected {
+                    Toggle(isOn: Binding(get: { model.ninja },
+                                         set: { _ in model.toggleNinja() })) {
+                        Text("Ниндзя (тихий режим)").font(.system(size: 13)).foregroundColor(.nkFG)
+                    }
+                } else {
+                    Toggle(isOn: $model.maskMac) {
+                        Text("Маскировать MAC при старте").font(.system(size: 13)).foregroundColor(.nkFG)
+                    }
+                }
+                Divider().overlay(Color.nkLine)
+                Text("netKillUI — ARP-инструмент для своей сети. Только авторизованное использование.")
+                    .font(.system(size: 12)).foregroundColor(.nkDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .toggleStyle(.switch)
+            .tint(.nkAccent)
+            .padding(20)
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.nkBG)
+    }
+}
+
+/// Шапка раздела: иконка + название.
+private struct ScreenHeader: View {
+    let icon: String
+    let title: String
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundColor(.nkAccent)
+            Text(title).font(.mono(13, weight: .bold)).foregroundColor(.nkFG)
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(Color.nkElev)
+        .overlay(Divider().overlay(Color.nkLine), alignment: .bottom)
     }
 }
 
@@ -71,6 +180,17 @@ private struct TitleBar: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         HStack {
+            if UIConfig.homeLauncher && model.activeScreen != .home {
+                Button(action: { model.goHome() }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.nkAccent)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("На главный экран")
+            }
             HStack(spacing: 2) {
                 (Text("net").foregroundColor(.nkFG)
                     + Text("Kill").foregroundColor(.nkAccent)

@@ -2,6 +2,20 @@ import Foundation
 import Combine
 import ARPSpoofCore
 
+/// Экраны приложения: home-лаунчер в стиле Flipper + разделы.
+enum AppScreen: Hashable {
+    case home, devices, defense, settings
+}
+
+/// Переключатели вида. Откат к прошлому интерфейсу — одним флагом:
+/// `homeLauncher = false` → приложение открывается сразу на экране устройств,
+/// без home-лаунчера, back-кнопки и разделов Defense/Settings.
+enum UIConfig {
+    // true — новый home-лаунчер (Flipper-стиль); false — прежний вид (сразу
+    // экран устройств, без лаунчера/разделов). Переключается одним флагом.
+    static let homeLauncher = false
+}
+
 struct Device: Identifiable, Hashable {
     let mac: MACAddress
     var ip: IPv4Address
@@ -25,6 +39,7 @@ private struct CachedDevice: Codable {
 }
 
 final class AppModel: ObservableObject {
+    @Published var activeScreen: AppScreen = UIConfig.homeLauncher ? .home : .devices
     @Published var interface = "en0"
     @Published var availableInterfaces: [String] = []
     @Published var devices: [Device] = []
@@ -96,6 +111,17 @@ final class AppModel: ObservableObject {
     func toggleTheme() {
         darkTheme.toggle()
         UserDefaults.standard.set(darkTheme, forKey: "nku.dark")
+    }
+
+    // MARK: Навигация по экранам (home-лаунчер)
+
+    func open(_ screen: AppScreen) { activeScreen = screen }
+    func goHome() { activeScreen = .home }
+
+    /// Открыть раздел устройств и, если движок поднят, включить монитор трафика.
+    func openMonitor() {
+        activeScreen = .devices
+        if connected, !ninja, !monitor { toggleMonitor() }
     }
 
     // Согласие в ТЕКУЩЕМ запуске (не персистим — предупреждение показываем при
