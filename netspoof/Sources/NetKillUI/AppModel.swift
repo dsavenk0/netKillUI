@@ -32,6 +32,8 @@ final class AppModel: ObservableObject {
     @Published var forwarding = false
     @Published var cutMode = true    // true = Cut (обрыв), false = Intercept (MITM)
     @Published var ninja = false     // тихий режим: пассивный скан + oneway + реже
+    @Published var monitor = false   // режим замера трафика (прозрачный MITM всех)
+    @Published var rates: [MACAddress: Double] = [:]   // KB/s по MAC (в мониторе)
     @Published var gateway = ""
     @Published var connected = false
     @Published var scanning = false
@@ -205,6 +207,20 @@ final class AppModel: ObservableObject {
         if connected { client.send(["cmd": "ninja", "on": ninja]) }
     }
 
+    /// Монитор трафика: прозрачный MITM всех на время замера (никого не режем),
+    /// показываем KB/s. При выключении — чистим ставки и возвращаем блокировки (cut).
+    func toggleMonitor() {
+        monitor.toggle()
+        if connected { client.send(["cmd": "monitor", "on": monitor]) }
+        if !monitor {
+            rates = [:]
+            armBlocked()   // вернуть резку заблокированных после замера
+        }
+        hintBanner = monitor
+            ? "📊 Монитор: прозрачный MITM — трафик идёт насквозь, НИКОГО не режем. Смотри KB/s и выбирай кого блокировать."
+            : nil
+    }
+
 
     /// Клик по устройству — постоянная блокировка (переживает перезапуск и
     /// переподключение устройства): blocked → движок травит, как только оно онлайн.
@@ -323,6 +339,7 @@ final class AppModel: ObservableObject {
             forwarding = obj["forwarding"] as? Bool ?? false
             if let c = obj["cut"] as? Bool { cutMode = c }
             if let n = obj["ninja"] as? Bool { ninja = n }
+            if let mon = obj["monitor"] as? Bool { monitor = mon }
             if let gw = obj["gateway"] as? String { gateway = gw }
             for i in devices.indices {
                 devices[i].active = devices[i].online && activeMacs.contains(devices[i].mac)
@@ -337,10 +354,25 @@ final class AppModel: ObservableObject {
                 saveCache()
             }
 
+        case "traffic":
+            if let arr = obj["rates"] as? [[String: String]] {
+                var r: [MACAddress: Double] = [:]
+                for p in arr {
+                    if let macS = p["mac"], let mac = MACAddress(macS),
+                       let kbps = Double(p["kbps"] ?? "") {
+                        r[mac] = kbps
+                    }
+                }
+                rates = r
+            }
+
         case "alert":
             if (obj["kind"] as? String) == "arp-spoof",
                let mac = obj["mac"] as? String, let ip = obj["ip"] as? String {
-                alertBanner = "⚠ Обнаружен ARP-спуфер: \(mac) выдаёт себя за \(ip)"
+                let defended = obj["defended"] as? Bool ?? false
+                alertBanner = defended
+                    ? "🛡 Атака отражена: \(mac) выдавал себя за шлюз \(ip) — шлюз закреплён статически, ты защищён."
+                    : "⚠ Обнаружен ARP-спуфер: \(mac) выдаёт себя за \(ip)"
             }
 
         case "error":

@@ -44,8 +44,14 @@ Filter).
   one (vendor OUI + random tail) at engine start, to hide your device's identity;
   verified and honestly reported (may be rolled back by the OS on Wi-Fi), and
   restored on exit.
-- **Foreign ARP-spoofer detection** — passively warns if *another* device on the
-  network is impersonating the gateway or you.
+- **Traffic monitor + radar** — a Monitor mode briefly becomes a transparent MITM
+  (no one is cut) to measure **per-device bandwidth (KB/s)**, shown both as numbers
+  and on an animated, app-styled **radar** whose blips scale with traffic. Off in
+  ninja mode.
+- **Foreign ARP-spoofer detection + active defense** — passively warns if *another*
+  device is impersonating the gateway or you, and, when your gateway is targeted,
+  **statically pins** the real gateway MAC in your own ARP cache so you can't be
+  poisoned (restored on exit).
 - **Multi-target** — block one device, a selection, or all online hosts at once.
 - **Safe by design** — your own machine and the gateway can't be targeted; ARP
   caches are restored and forwarding is disabled when you stop or quit.
@@ -110,6 +116,7 @@ ARPSpoofCore
   Bonjour/Hostname  device names via mDNS + reverse DNS
   MACMasker         plausible random MAC, apply + verify
   TrafficMeter      per-MAC byte accounting over a transparent MITM
+  ARPPin            static ARP pin (self-defense against being spoofed)
   SpoofEngine       multi-target, MAC→IP bindings, live re-targeting, spoof detect
 netspoof (CLI)      scan / spoof / serve
 NetKillUI (SwiftUI) device list, blocking, osascript privilege elevation

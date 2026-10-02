@@ -36,6 +36,8 @@ final class ForwardingControl {
 final class ServeState {
     var ninja = false     // тихий режим: пассивное обнаружение + умеренный темп травли
     var masked = false    // наш MAC замаскирован на старте (--mask-mac закрепился)
+    var monitor = false   // режим замера трафика: прозрачный MITM всех, не режем
+    var meter: TrafficMeter?
 }
 
 // MARK: - JSON helpers
@@ -55,7 +57,7 @@ private func macList(_ cmd: [String: Any]) -> [MACAddress] {
     return out
 }
 
-private func statusPayload(_ engine: SpoofEngine, _ fwd: ForwardingControl, ninja: Bool) -> [String: Any] {
+private func statusPayload(_ engine: SpoofEngine, _ fwd: ForwardingControl, _ state: ServeState) -> [String: Any] {
     let targets: [[String: String]] = engine.active.map { mac in
         ["mac": mac.description, "ip": engine.currentIP(of: mac)?.description ?? ""]
     }
@@ -64,7 +66,8 @@ private func statusPayload(_ engine: SpoofEngine, _ fwd: ForwardingControl, ninj
         "targets": targets,
         "forwarding": fwd.isOn,
         "cut": fwd.cutMode,
-        "ninja": ninja,
+        "ninja": state.ninja,
+        "monitor": state.monitor,
         "gateway": engine.gatewayIP.description,
     ]
 }
@@ -130,20 +133,20 @@ private func handle(_ cmd: [String: Any], client: Int32,
         for m in macs { engine.start(m) }
         fwd.apply(hasActive: !engine.active.isEmpty)
         print("cmd start: запрошено \(macs.count), активно \(engine.active.count), cut=\(fwd.cutMode), fwd=\(fwd.isOn)")
-        sendJSON(client, statusPayload(engine, fwd, ninja: state.ninja))
+        sendJSON(client, statusPayload(engine, fwd, state))
 
     case "stop":
         let macs = macList(cmd)
         for m in macs { engine.stop(m) }
         fwd.apply(hasActive: !engine.active.isEmpty)
         print("cmd stop: запрошено \(macs.count), активно \(engine.active.count)")
-        sendJSON(client, statusPayload(engine, fwd, ninja: state.ninja))
+        sendJSON(client, statusPayload(engine, fwd, state))
 
     case "stopAll":
         engine.stopAll()
         fwd.apply(hasActive: false)
         print("cmd stopAll: активно \(engine.active.count)")
-        sendJSON(client, statusPayload(engine, fwd, ninja: state.ninja))
+        sendJSON(client, statusPayload(engine, fwd, state))
 
     case "mode":
         if let cut = cmd["cut"] as? Bool {
@@ -151,7 +154,7 @@ private func handle(_ cmd: [String: Any], client: Int32,
             fwd.apply(hasActive: !engine.active.isEmpty)
             print("cmd mode: cut=\(cut), fwd=\(fwd.isOn)")
         }
-        sendJSON(client, statusPayload(engine, fwd, ninja: state.ninja))
+        sendJSON(client, statusPayload(engine, fwd, state))
 
     case "ninja":
         if let on = cmd["on"] as? Bool {
@@ -163,10 +166,37 @@ private func handle(_ cmd: [String: Any], client: Int32,
             // режем эффективно (two-way), лишь умеренно снижая темп переотправки.
             print("cmd ninja: \(on)")
         }
-        sendJSON(client, statusPayload(engine, fwd, ninja: state.ninja))
+        sendJSON(client, statusPayload(engine, fwd, state))
+
+    case "monitor":
+        let on = (cmd["on"] as? Bool) ?? false
+        if on, !state.ninja {
+            // Прозрачный MITM всех найденных — «чисто для замера, без замедления»:
+            // forwarding ON, трафик идёт насквозь, считаем байты по MAC.
+            let interest = Set(engine.bindings.keys)
+                .subtracting([engine.gatewayMAC, engine.spoofer.iface.mac])
+            if let meter = try? TrafficMeter(interface: engine.spoofer.iface.name, interest: interest) {
+                state.meter = meter
+                state.monitor = true
+                fwd.cutMode = false
+                for m in interest { engine.start(m) }
+                fwd.apply(hasActive: !engine.active.isEmpty)   // forwarding ON
+                print("cmd monitor: ON, устройств \(interest.count), fwd=\(fwd.isOn)")
+            } else {
+                sendJSON(client, ["event": "error", "message": "не удалось открыть BPF для монитора"])
+            }
+        } else {
+            state.monitor = false
+            state.meter = nil
+            engine.stopAll()
+            fwd.cutMode = true
+            fwd.apply(hasActive: false)
+            print("cmd monitor: OFF")
+        }
+        sendJSON(client, statusPayload(engine, fwd, state))
 
     case "status":
-        sendJSON(client, statusPayload(engine, fwd, ninja: state.ninja))
+        sendJSON(client, statusPayload(engine, fwd, state))
 
     default:
         sendJSON(client, ["event": "error", "message": "неизвестная команда \(c)"])
@@ -201,15 +231,27 @@ func runServe(info: InterfaceInfo, engine: SpoofEngine, bpf: BPFDevice,
             "gatewayMac": engine.gatewayMAC.description,
         ])
 
-        // Детект чужого ARP-спуфера в сети → алерт клиенту.
+        // Детект чужого ARP-спуфера → алерт клиенту. Если травят НАШ шлюз —
+        // активная защита: статически закрепляем правильный MAC шлюза в своём
+        // кэше (чужие ARP-ответы его больше не перезапишут).
+        var gatewayPinned = false
         engine.onSpoofDetected = { attacker, ip in
+            var defended = false
+            if ip == engine.gatewayIP {
+                ARPPin.pin(ip: engine.gatewayIP, mac: engine.gatewayMAC)
+                gatewayPinned = true
+                defended = true
+                print("🛡 защита: закрепил шлюз \(engine.gatewayIP) → \(engine.gatewayMAC) статически")
+            }
             sendJSON(client, ["event": "alert", "kind": "arp-spoof",
-                              "mac": attacker.description, "ip": ip.description])
+                              "mac": attacker.description, "ip": ip.description,
+                              "defended": defended])
             print("⚠ ARP-спуфер: \(attacker) выдаёт себя за \(ip)")
         }
 
         var buf = [UInt8]()
         var lastTick = Date()
+        var lastTraffic = Date()
 
         clientLoop: while gStop == 0 {
             var fds = [
@@ -226,6 +268,19 @@ func runServe(info: InterfaceInfo, engine: SpoofEngine, bpf: BPFDevice,
             if Date().timeIntervalSince(lastTick) * 1000 >= Double(eff) {
                 engine.tick()
                 lastTick = Date()
+            }
+
+            // Монитор трафика: сливаем счётчик (без блокировки) и раз в секунду
+            // шлём KB/s по устройствам. Работает только при включённом мониторе.
+            if state.monitor, let meter = state.meter {
+                meter.drain()
+                if Date().timeIntervalSince(lastTraffic) >= 1.0 {
+                    let arr = meter.rates().map {
+                        ["mac": $0.key.description, "kbps": String(format: "%.1f", $0.value)]
+                    }
+                    sendJSON(client, ["event": "traffic", "rates": arr])
+                    lastTraffic = Date()
+                }
             }
 
             // Команды от клиента.
@@ -258,6 +313,12 @@ func runServe(info: InterfaceInfo, engine: SpoofEngine, bpf: BPFDevice,
         // Watchdog: клиент ушёл — восстановить кэши и выключить forwarding.
         print("client: отключился — восстанавливаю ARP-кэши")
         engine.onSpoofDetected = nil
+        if gatewayPinned {
+            ARPPin.unpin(ip: engine.gatewayIP)   // вернуть динамический ARP для шлюза
+            gatewayPinned = false
+        }
+        state.monitor = false
+        state.meter = nil
         engine.stopAll()
         fwd.disableIfEnabled()
         close(client)

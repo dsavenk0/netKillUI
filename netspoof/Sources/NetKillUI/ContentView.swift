@@ -21,6 +21,15 @@ struct ContentView: View {
                 SelectionBar()
                 Divider().overlay(Color.nkLine)
             }
+            if model.monitor {
+                TrafficRadar(
+                    devices: model.devices.filter { $0.online && !$0.isGateway && !$0.isSelf },
+                    rates: model.rates
+                )
+                .frame(height: 230)
+                .padding(.vertical, 10)
+                Divider().overlay(Color.nkLine)
+            }
             SectionHeader()
             DeviceList()
             StatusBar()
@@ -103,24 +112,29 @@ private struct TitleBar: View {
                     .padding(.leading, 6)
             }
             if model.connected {
+                // Явная кнопка-пилюля с подписью — чтобы читалась как тумблер, а не декор.
                 Button(action: { model.toggleNinja() }) {
-                    Text("🥷")
-                        .font(.system(size: 15))
-                        .grayscale(1).saturation(0)          // монохромный emoji
-                        .opacity(model.ninja ? 1 : 0.45)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(model.ninja ? Color.nkAccent.opacity(0.12) : Color.clear)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7)
-                                .stroke(model.ninja ? Color.nkAccent.opacity(0.5) : Color.clear, lineWidth: 1)
-                        )
-                        .contentShape(Rectangle())
+                    HStack(spacing: 5) {
+                        Text("🥷")
+                            .font(.system(size: 14))
+                            .grayscale(1).saturation(0)          // монохромный emoji
+                            .opacity(model.ninja ? 1 : 0.6)
+                        Text("Ninja").font(.mono(10.5))
+                    }
+                    .foregroundColor(model.ninja ? .nkAccent : .nkDim)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(model.ninja ? Color.nkAccent.opacity(0.12) : Color.nkElev)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(model.ninja ? Color.nkAccent.opacity(0.5) : Color.nkLine, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Тихий режим: пассивное обнаружение без ARP-свипа + oneway-спуфинг, реже переотправка. Меньше следов — но не невидимость: ARP-poisoning всё равно детектируется.")
+                .help("Тихий режим: пассивное обнаружение (ARP-кэш ОС, без свипа) + умеренный темп травли. Меньше следов в разведке — но не невидимость: ARP-poisoning всё равно детектируется.")
                 .padding(.leading, 10)
             }
             Button(action: { model.toggleTheme() }) {
@@ -167,6 +181,13 @@ private struct Toolbar: View {
 
             Spacer()
 
+            // Монитор трафика — только вне ниндзя (активный MITM = шум/засветка).
+            if model.connected && !model.ninja {
+                toolButton(model.monitor ? "◉ Monitor" : "◯ Monitor", accent: model.monitor,
+                           help: "Замер трафика: прозрачный MITM всех на время замера — никого не режем, показываем KB/s по устройствам. Решай кого блокировать. В ниндзя недоступно.") {
+                    model.toggleMonitor()
+                }
+            }
             if !model.ninja {
                 toolButton("▶ Spoof All", accent: true) { model.spoofAll() }
             }
@@ -369,7 +390,7 @@ private struct DeviceRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            StatusChip(device: device)
+            StatusChip(device: device, monitoring: model.monitor, rate: model.rates[device.mac])
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
@@ -384,12 +405,20 @@ private struct DeviceRow: View {
 
 private struct StatusChip: View {
     let device: Device
+    var monitoring: Bool = false
+    var rate: Double? = nil
     var body: some View {
         Group {
             if device.isSelf {
                 chip("THIS MAC", color: .nkSelect)
             } else if device.isGateway {
                 chip("⌂ GATEWAY", color: .nkDim)
+            } else if monitoring {
+                // Замер трафика: показываем KB/s (акцент — у заметной нагрузки).
+                let kb = rate ?? 0
+                chip(String(format: "%@ %.0f KB/s", kb > 1 ? "↓" : "·", kb),
+                     color: kb > 20 ? .nkAccent : (kb > 1 ? .nkFG : .nkDim),
+                     filled: kb > 20)
             } else if device.active {
                 chip("● SPOOFING", color: .nkAccent, filled: true)
             } else if device.blocked {
@@ -412,6 +441,95 @@ private struct StatusChip: View {
                 .fill(filled ? color.opacity(0.10) : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: 99)
                 .stroke(filled ? color.opacity(0.45) : Color.nkLine, lineWidth: 1))
+    }
+}
+
+// MARK: - Traffic radar
+
+/// Радар в стиле приложения для режима Monitor: тёмный круг, концентрические
+/// кольца, вращающийся луч развёртки; устройства — блипы по кругу, размер и
+/// яркость ∝ KB/s, вспыхивают, когда луч проходит мимо.
+private struct TrafficRadar: View {
+    let devices: [Device]
+    let rates: [MACAddress: Double]
+
+    private let sweepPeriod: Double = 4.0   // секунд на оборот
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            Canvas { ctx, size in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let c = CGPoint(x: size.width / 2, y: size.height / 2)
+                let R = min(size.width, size.height) / 2 - 10
+                guard R > 10 else { return }
+
+                // Кольца.
+                for k in 1...4 {
+                    let r = R * CGFloat(k) / 4
+                    ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)),
+                               with: .color(.nkLine), lineWidth: 1)
+                }
+                // Перекрестье.
+                var cross = Path()
+                cross.move(to: CGPoint(x: c.x - R, y: c.y)); cross.addLine(to: CGPoint(x: c.x + R, y: c.y))
+                cross.move(to: CGPoint(x: c.x, y: c.y - R)); cross.addLine(to: CGPoint(x: c.x, y: c.y + R))
+                ctx.stroke(cross, with: .color(.nkLine.opacity(0.6)), lineWidth: 1)
+
+                // Луч развёртки с затухающим шлейфом.
+                let sweep = (t.truncatingRemainder(dividingBy: sweepPeriod) / sweepPeriod) * 2 * .pi
+                func pt(_ a: Double, _ r: CGFloat) -> CGPoint {
+                    CGPoint(x: c.x + cos(a) * r, y: c.y + sin(a) * r)
+                }
+                for i in 0..<28 {
+                    let a = sweep - Double(i) * 0.028
+                    let op = (1 - Double(i) / 28) * 0.30
+                    var p = Path(); p.move(to: c); p.addLine(to: pt(a, R))
+                    ctx.stroke(p, with: .color(.nkAccent.opacity(op)), lineWidth: 2)
+                }
+                var lead = Path(); lead.move(to: c); lead.addLine(to: pt(sweep, R))
+                ctx.stroke(lead, with: .color(.nkAccent), lineWidth: 2)
+                ctx.fill(Path(ellipseIn: CGRect(x: c.x - 3, y: c.y - 3, width: 6, height: 6)),
+                         with: .color(.nkAccent))
+
+                // Блипы устройств.
+                for d in devices {
+                    let a = angle(d.mac)
+                    let rf = radiusFactor(d.mac)
+                    let p = pt(a, R * rf)
+                    let kb = rates[d.mac] ?? 0
+                    let blip = 3.0 + min(13.0, sqrt(kb) * 2.2)
+
+                    // Подсветка, когда луч рядом (классический радар).
+                    var da = (sweep - a).truncatingRemainder(dividingBy: 2 * .pi)
+                    if da < 0 { da += 2 * .pi }
+                    let glow = da < 0.9 ? (1 - da / 0.9) : 0
+                    let op = 0.35 + 0.65 * glow + min(0.3, kb / 80)
+
+                    ctx.fill(Path(ellipseIn: CGRect(x: p.x - blip, y: p.y - blip, width: 2 * blip, height: 2 * blip)),
+                             with: .color(.nkAccent.opacity(min(1, op))))
+                    if glow > 0.05 {
+                        let g = blip + 5
+                        ctx.fill(Path(ellipseIn: CGRect(x: p.x - g, y: p.y - g, width: 2 * g, height: 2 * g)),
+                                 with: .color(.nkAccent.opacity(0.18 * glow)))
+                    }
+                    // Подпись у заметной нагрузки.
+                    if kb > 1 {
+                        let label = d.name ?? ".\(d.ip.description.split(separator: ".").last.map(String.init) ?? "")"
+                        ctx.draw(Text("\(label)  \(Int(kb))k").font(.mono(9)).foregroundColor(.nkDim),
+                                 at: CGPoint(x: p.x, y: p.y - blip - 8))
+                    }
+                }
+            }
+        }
+    }
+
+    private func angle(_ mac: MACAddress) -> Double {
+        let h = mac.bytes.enumerated().reduce(0) { $0 &+ Int($1.element) &* (($1.offset + 1) * 37) }
+        return Double(((h % 360) + 360) % 360) * .pi / 180
+    }
+    private func radiusFactor(_ mac: MACAddress) -> Double {
+        let h = mac.bytes.reduce(0) { $0 &+ Int($1) }
+        return 0.42 + Double(h % 100) / 100 * 0.46   // 0.42..0.88, стабильно
     }
 }
 
