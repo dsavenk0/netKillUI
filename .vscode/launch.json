@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:netKillUI}/netspoof",
+            "name": "Debug netspoof (netspoof)",
+            "target": "netspoof",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug netspoof (netspoof)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:netKillUI}/netspoof",
+            "name": "Release netspoof (netspoof)",
+            "target": "netspoof",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release netspoof (netspoof)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:netKillUI}/netspoof",
+            "name": "Debug NetKillUI (netspoof)",
+            "target": "NetKillUI",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug NetKillUI (netspoof)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:netKillUI}/netspoof",
+            "name": "Release NetKillUI (netspoof)",
+            "target": "NetKillUI",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release NetKillUI (netspoof)"
+        }
+    ]
+}
