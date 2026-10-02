@@ -13,7 +13,8 @@ public protocol ARPSpoofing: AnyObject {
 
     func probeSubnet()
     func poisonOnce(victimIP: IPv4Address, victimMAC: MACAddress,
-                    gatewayIP: IPv4Address, gatewayMAC: MACAddress, oneway: Bool)
+                    gatewayIP: IPv4Address, gatewayMAC: MACAddress,
+                    oneway: Bool, route: MACAddress?)
     func restore(victimIP: IPv4Address, victimMAC: MACAddress,
                  gatewayIP: IPv4Address, gatewayMAC: MACAddress, times: Int)
 }

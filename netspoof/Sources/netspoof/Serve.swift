@@ -149,16 +149,22 @@ private func handle(_ cmd: [String: Any], client: Int32,
             if let meter = try? TrafficMeter(interface: engine.spoofer.iface.name, interest: interest) {
                 state.meter = meter
                 state.monitor = true
+                // Заблокированные (список от GUI) держим ОТРЕЗАННЫМИ через blackhole —
+                // их трафик в никуда, доступа не получают даже при forwarding ON;
+                // остальные идут сквозь нас и реально замеряются.
+                let blocked = (cmd["blocked"] as? [String])?.compactMap { MACAddress($0) } ?? []
+                engine.blackholed = Set(blocked)
                 fwd.cutMode = false
                 for m in interest { engine.start(m) }
                 fwd.apply(hasActive: !engine.active.isEmpty)   // forwarding ON
-                Log.info("cmd monitor: ON, устройств \(interest.count), fwd=\(fwd.isOn)")
+                Log.info("cmd monitor: ON, устройств \(interest.count), blackhole \(engine.blackholed.count), fwd=\(fwd.isOn)")
             } else {
                 sendJSON(client, ["event": "error", "message": "не удалось открыть BPF для монитора"])
             }
         } else {
             state.monitor = false
             state.meter = nil
+            engine.blackholed = []
             engine.stopAll()
             fwd.cutMode = true
             fwd.apply(hasActive: false)

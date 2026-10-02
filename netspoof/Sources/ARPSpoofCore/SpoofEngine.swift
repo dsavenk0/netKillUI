@@ -15,6 +15,13 @@ public final class SpoofEngine {
     public private(set) var bindings: [MACAddress: IPv4Address] = [:]
     public private(set) var active: Set<MACAddress> = []
 
+    /// Цели, которые надо держать ОТРЕЗАННЫМИ даже при включённом forwarding
+    /// (monitor-режим): их травим на несуществующий MAC `blackholeMAC`, трафик
+    /// уходит в никуда. Остальные активные травятся на нас (идут сквозь — замер).
+    public var blackholed: Set<MACAddress> = []
+    /// Несуществующий локально-админский MAC для «чёрной дыры».
+    public let blackholeMAC = MACAddress(bytes: [0x02] + (0..<5).map { _ in UInt8.random(in: 0...255) })
+
     /// Вызывается, когда замечен ЧУЖОЙ ARP-спуфер: (атакующий MAC, подменяемый IP).
     public var onSpoofDetected: ((MACAddress, IPv4Address) -> Void)?
     private var reportedSpoofers = Set<MACAddress>()
@@ -85,8 +92,12 @@ public final class SpoofEngine {
     public func tick() {
         for mac in active {
             guard let ip = bindings[mac] else { continue }
+            // blackholed цели травим на несуществующий MAC (отрезаны даже при
+            // forwarding ON); остальные — на нас (через нас → замер трафика).
+            let route = blackholed.contains(mac) ? blackholeMAC : nil
             spoofer.poisonOnce(victimIP: ip, victimMAC: mac,
-                               gatewayIP: gatewayIP, gatewayMAC: gatewayMAC, oneway: oneway)
+                               gatewayIP: gatewayIP, gatewayMAC: gatewayMAC,
+                               oneway: oneway, route: route)
         }
     }
 }

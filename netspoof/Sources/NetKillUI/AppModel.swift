@@ -266,13 +266,20 @@ final class AppModel: ObservableObject {
     /// показываем KB/s. При выключении — чистим ставки и возвращаем блокировки (cut).
     func toggleMonitor() {
         monitor.toggle()
-        if connected { client.send(["cmd": "monitor", "on": monitor]) }
+        if connected {
+            var cmd: [String: Any] = ["cmd": "monitor", "on": monitor]
+            // Передаём список заблокированных: в мониторе их держат отрезанными
+            // (blackhole), доступа не получают, а остальных реально замеряем.
+            if monitor { cmd["blocked"] = Array(blockedMacs) }
+            client.send(cmd)
+        }
         if !monitor {
             rates = [:]
-            armBlocked()   // вернуть резку заблокированных после замера
+            armBlocked()   // вернуть обычную резку заблокированных после замера
         }
         hintBanner = monitor
-            ? "Монитор: прозрачный MITM — трафик идёт насквозь, НИКОГО не режем. Смотри KB/s и выбирай кого блокировать."
+            ? "Монитор: меряем KB/s. Незаблокированные идут сквозь нас (реальная скорость), "
+              + "а заблокированные остаются отрезаны — доступа не получают."
             : nil
     }
 

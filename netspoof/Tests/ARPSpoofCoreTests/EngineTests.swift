@@ -12,6 +12,7 @@ private final class SpySpoofer: ARPSpoofing {
         let victimIP: IPv4Address, victimMAC: MACAddress
         let gatewayIP: IPv4Address, gatewayMAC: MACAddress
         let oneway: Bool
+        let route: MACAddress?   // nil = наш MAC; иначе blackhole
     }
     private(set) var poisons: [Poison] = []
     private(set) var restored: [MACAddress] = []
@@ -22,9 +23,11 @@ private final class SpySpoofer: ARPSpoofing {
     func resolveNames(for hosts: [ARPSpoofCore.Host], duration: TimeInterval) -> [MACAddress: String] { [:] }
     func probeSubnet() { probeCount += 1 }
     func poisonOnce(victimIP: IPv4Address, victimMAC: MACAddress,
-                    gatewayIP: IPv4Address, gatewayMAC: MACAddress, oneway: Bool) {
+                    gatewayIP: IPv4Address, gatewayMAC: MACAddress,
+                    oneway: Bool, route: MACAddress?) {
         poisons.append(Poison(victimIP: victimIP, victimMAC: victimMAC,
-                              gatewayIP: gatewayIP, gatewayMAC: gatewayMAC, oneway: oneway))
+                              gatewayIP: gatewayIP, gatewayMAC: gatewayMAC,
+                              oneway: oneway, route: route))
     }
     func restore(victimIP: IPv4Address, victimMAC: MACAddress,
                  gatewayIP: IPv4Address, gatewayMAC: MACAddress, times: Int) {
@@ -119,6 +122,23 @@ private func senderFrame(mac: MACAddress, ip: IPv4Address) -> [UInt8] {
     engine.start(victimMAC)      // IP неизвестен
     engine.tick()
     #expect(spy.poisons.isEmpty) // нечего травить — и НИЧЕГО не шлём
+}
+
+@Test func tickBlackholesBlockedTargetsRoutesOthersThroughUs() {
+    let (engine, spy) = makeEngine()
+    let m2 = MACAddress("dd:dd:dd:dd:dd:dd")!
+    engine.observe(ARPSpoofCore.Host(ip: victimIP, mac: victimMAC))
+    engine.observe(ARPSpoofCore.Host(ip: IPv4Address("192.168.1.50")!, mac: m2))
+    engine.start(victimMAC); engine.start(m2)
+    engine.blackholed = [victimMAC]   // victim — отрезан, m2 — сквозь нас (замер)
+    engine.tick()
+
+    let pv = try! #require(spy.poisons.first { $0.victimMAC == victimMAC })
+    let pm = try! #require(spy.poisons.first { $0.victimMAC == m2 })
+    #expect(pv.route == engine.blackholeMAC)   // blackhole → трафик в никуда
+    #expect(pm.route == nil)                   // nil = наш MAC → идёт через нас
+    // blackhole-MAC синтетический: юникаст + locally-administered.
+    #expect(engine.blackholeMAC.bytes[0] & 0x03 == 0x02)
 }
 
 // MARK: - Блок-на-появление (ключевая регрессия)
