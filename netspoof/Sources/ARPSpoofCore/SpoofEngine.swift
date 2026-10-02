@@ -34,6 +34,9 @@ public final class SpoofEngine {
     public func currentIP(of mac: MACAddress) -> IPv4Address? { bindings[mac] }
 
     public func start(_ mac: MACAddress) {
+        // Защита: нельзя травить сам этот Mac (себя) или шлюз — иначе можно
+        // отрезать себе сеть/маршрут. Эти цели игнорируются молча.
+        guard mac != spoofer.iface.mac, mac != gatewayMAC else { return }
         active.insert(mac)
         if bindings[mac] == nil { spoofer.probeSubnet() } // IP придёт в ingest()
     }

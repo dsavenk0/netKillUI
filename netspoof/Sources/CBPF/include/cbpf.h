@@ -26,6 +26,10 @@ int cbpf_set_arp_filter(int fd);
 // Пишет 4 байта в out, 0 — успех, -1 — не найдено/ошибка.
 int cbpf_default_gateway(unsigned char out[4]);
 
+// Завершить все другие процессы с именем "netspoof" (кроме себя).
+// Единственный экземпляр демона — без внешнего pkill и само-ловушек.
+void cbpf_kill_other_netspoof(void);
+
 // Разбор заголовка bpf_hdr, лежащего по указателю p.
 unsigned int cbpf_hdr_len(const void *p);   // bh_hdrlen
 unsigned int cbpf_caplen(const void *p);     // bh_caplen

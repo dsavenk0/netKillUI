@@ -195,6 +195,8 @@ case "spoof":
     print("Готово.")
 
 case "serve":
+    // Единственный экземпляр: убираем прежних демонов-сирот (мы root).
+    killOtherNetspoofInstances()
     let socketPath = optValue(["--socket"]) ?? "/tmp/netspoof.sock"
     let oneway = hasFlag("--oneway")
     let noForward = hasFlag("--no-forward")

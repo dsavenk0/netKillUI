@@ -9,6 +9,9 @@
 #include <sys/sysctl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <libproc.h>
+#include <signal.h>
+#include <unistd.h>
 
 int cbpf_set_interface(int fd, const char *ifname) {
     struct ifreq ifr;
@@ -126,4 +129,27 @@ int cbpf_default_gateway(unsigned char out[4]) {
 
     free(buf);
     return found;
+}
+
+void cbpf_kill_other_netspoof(void) {
+    pid_t self = getpid();
+    int bytes = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+    if (bytes <= 0) return;
+
+    int cap = bytes + 16 * (int)sizeof(pid_t);
+    pid_t *pids = (pid_t *)malloc(cap);
+    if (!pids) return;
+
+    int got = proc_listpids(PROC_ALL_PIDS, 0, pids, cap);
+    int count = got / (int)sizeof(pid_t);
+    char name[256];
+    for (int i = 0; i < count; i++) {
+        pid_t p = pids[i];
+        if (p <= 0 || p == self) continue;
+        name[0] = 0;
+        if (proc_name(p, name, sizeof(name)) > 0 && strcmp(name, "netspoof") == 0) {
+            kill(p, SIGKILL);
+        }
+    }
+    free(pids);
 }

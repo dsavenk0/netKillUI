@@ -19,7 +19,7 @@ struct ContentView: View {
         }
         .background(Color.nkBG)
         .foregroundColor(.nkFG)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(model.darkTheme ? .dark : .light)
         .sheet(isPresented: $model.showConsent) {
             ConsentView().environmentObject(model)
         }
@@ -36,14 +36,30 @@ struct ContentView: View {
 
 // MARK: - Titlebar
 
+/// Терминальный мигающий курсор у названия.
+private struct BlinkingCursor: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            let on = Int(context.date.timeIntervalSinceReferenceDate / 0.5) % 2 == 0
+            Text("▊")
+                .font(.mono(13, weight: .bold))
+                .foregroundColor(.nkAccent)
+                .opacity(on ? 1 : 0)
+        }
+    }
+}
+
 private struct TitleBar: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         HStack {
-            (Text("net").foregroundColor(.nkFG)
-                + Text("Kill").foregroundColor(.nkAccent)
-                + Text("UI").foregroundColor(.nkFG))
-                .font(.mono(13, weight: .bold))
+            HStack(spacing: 2) {
+                (Text("net").foregroundColor(.nkFG)
+                    + Text("Kill").foregroundColor(.nkAccent)
+                    + Text("UI").foregroundColor(.nkFG))
+                    .font(.mono(13, weight: .bold))
+                BlinkingCursor()
+            }
             Spacer()
             Circle()
                 .fill(model.connected ? Color.nkOnline : Color.nkDim)
@@ -51,6 +67,17 @@ private struct TitleBar: View {
             Text(model.connected ? "engine up" : "offline")
                 .font(.mono(10))
                 .foregroundColor(.nkDim)
+                .padding(.leading, 6)
+            Button(action: { model.toggleTheme() }) {
+                Image(systemName: model.darkTheme ? "moon.stars.fill" : "sun.max.fill")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundColor(.nkAccent)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Светлая/тёмная тема")
+            .padding(.leading, 16)
         }
         .padding(.horizontal, 14)
         .frame(height: 38)
@@ -69,7 +96,10 @@ private struct Toolbar: View {
                     Button(i) { model.interface = i }
                 }
             } label: {
-                Text("if ").foregroundColor(.nkFG) + Text(model.interface).foregroundColor(.nkDim)
+                HStack(spacing: 5) {
+                    Image(systemName: "network").font(.system(size: 11)).foregroundColor(.nkDim)
+                    Text(model.interface).foregroundColor(.nkFG)
+                }
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -205,13 +235,13 @@ private struct DeviceRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Button(action: { model.toggle(device) }) {
-                Text(device.isGateway ? "—" : (device.active ? "◉" : "◯"))
+                Text(device.isGateway || device.isSelf ? "—" : (device.active ? "◉" : "◯"))
                     .font(.mono(18))
                     .foregroundColor(device.active ? .nkAccent : .nkDim)
                     .frame(width: 24)
             }
             .buttonStyle(.plain)
-            .disabled(device.isGateway)
+            .disabled(device.isGateway || device.isSelf)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.ip.description).font(.mono(14, weight: .medium))
@@ -238,7 +268,7 @@ private struct DeviceRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
         .contextMenu {
-            if !device.isGateway {
+            if !device.isGateway && !device.isSelf {
                 Button(device.active ? "Stop spoof" : "Spoof") { model.toggle(device) }
             }
         }
@@ -249,7 +279,9 @@ private struct StatusChip: View {
     let device: Device
     var body: some View {
         Group {
-            if device.isGateway {
+            if device.isSelf {
+                chip("THIS MAC", color: .nkSelect)
+            } else if device.isGateway {
                 chip("⌂ GATEWAY", color: .nkDim)
             } else if device.active {
                 chip("● SPOOFING", color: .nkAccent, filled: true)
@@ -293,16 +325,57 @@ private struct StatusBar: View {
 
 // MARK: - Empty state
 
+/// Анимированный ASCII-метр: бегущая волна блоков (█▓▒░) в акценте по тусклой дорожке.
+private struct ScanMeter: View {
+    var width: Int = 30
+    var fontSize: CGFloat = 16
+    var kerning: CGFloat = 2
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.08)) { context in
+            Text(bar(at: context.date))
+                .font(.mono(fontSize))
+                .kerning(kerning)
+        }
+    }
+
+    private func bar(at date: Date) -> AttributedString {
+        let period = width + 10
+        let step = Int(date.timeIntervalSinceReferenceDate / 0.08)
+        let head = step % period - 5
+        var out = AttributedString()
+        for i in 0..<width {
+            let dist = abs(i - head)
+            let ch: Character
+            let bright: Bool
+            switch dist {
+            case 0: ch = "█"; bright = true
+            case 1: ch = "▓"; bright = true
+            case 2: ch = "▒"; bright = true
+            default: ch = "░"; bright = false
+            }
+            var seg = AttributedString(String(ch))
+            seg.foregroundColor = bright ? Color.nkAccent : Color.nkDim
+            out.append(seg)
+        }
+        return out
+    }
+}
+
 private struct EmptyState: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
-        VStack(spacing: 10) {
-            Text(model.scanning ? "▓▓▓░ сканирую сеть…"
-                 : (model.connected ? "хостов не найдено" : "движок не запущен"))
-                .font(.mono(13)).foregroundColor(.nkDim)
-            if !model.connected && !model.scanning {
-                Text("нажмите ⏻ Start engine, чтобы просканировать сеть")
-                    .font(.system(size: 12)).foregroundColor(.nkDim)
+        VStack(spacing: 16) {
+            if model.scanning {
+                ScanMeter()
+                Text("сканирую сеть…").font(.mono(13)).foregroundColor(.nkDim)
+            } else {
+                Text(model.connected ? "хостов не найдено" : "движок не запущен")
+                    .font(.mono(13)).foregroundColor(.nkDim)
+                if !model.connected {
+                    Text("нажмите ⏻ Start engine, чтобы просканировать сеть")
+                        .font(.system(size: 12)).foregroundColor(.nkDim)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

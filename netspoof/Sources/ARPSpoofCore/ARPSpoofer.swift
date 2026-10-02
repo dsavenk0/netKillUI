@@ -20,55 +20,72 @@ public final class ARPSpoofer {
     }
 
     /// Разослать ARP-request по всей подсети и собрать ответивших.
-    public func scan(duration: TimeInterval = 3.0) -> [Host] {
+    /// Только ARP-обнаружение (без имён) — быстрый список хостов. Рассылаем запросы
+    /// и повторяем раунд раз в ~1с, пока собираем ответы.
+    public func discoverHosts(duration: TimeInterval = 2.5) -> [Host] {
         let mask = iface.netmask ?? IPv4Address(bytes: [255, 255, 255, 0])
-        let hosts = hostsInSubnet(ip: iface.ip, mask: mask)
-
-        for h in hosts where h != iface.ip {
-            let req = buildARPFrame(op: .request,
-                                    senderMAC: iface.mac, senderIP: iface.ip,
-                                    targetMAC: .zero, targetIP: h,
-                                    ethDst: .broadcast, ethSrc: iface.mac)
-            try? bpf.send(req)
-            usleep(1500) // лёгкий троттлинг, чтобы не переполнить буфер
+        let hosts = hostsInSubnet(ip: iface.ip, mask: mask).filter { $0 != iface.ip }
+        func probe() {
+            for h in hosts {
+                let req = buildARPFrame(op: .request,
+                                        senderMAC: iface.mac, senderIP: iface.ip,
+                                        targetMAC: .zero, targetIP: h,
+                                        ethDst: .broadcast, ethSrc: iface.mac)
+                try? bpf.send(req)
+                usleep(800)
+            }
         }
-
+        probe()
         var found = [IPv4Address: MACAddress]()
         let deadline = Date().addingTimeInterval(duration)
+        var lastProbe = Date()
         while Date() < deadline {
-            for f in bpf.receive(timeoutMS: 200) {
-                if let (mac, sip) = parseARPReply(f) {
-                    found[sip] = mac
-                }
+            for f in bpf.receive(timeoutMS: 150) {
+                if let (mac, sip) = parseARPReply(f) { found[sip] = mac }
             }
+            if Date().timeIntervalSince(lastProbe) > 1.0 { probe(); lastProbe = Date() }
         }
-        var result = found.sorted { $0.key.hostOrder < $1.key.hostOrder }
+        return found.sorted { $0.key.hostOrder < $1.key.hostOrder }
             .map { Host(ip: $0.key, mac: $0.value) }
+    }
 
-        // Сетевые имена — параллельно, с общим таймаутом (резолвер блокирующий).
-        // Важно: массив result мутирует только этот поток; потоки пишут в
-        // защищённый замком словарь, который мы снимаем снимком после ожидания.
-        let queue = DispatchQueue(label: "netspoof.resolve", attributes: .concurrent)
-        let group = DispatchGroup()
-        let lock = NSLock()
-        var names = [Int: String]()
-        for i in result.indices {
-            let ip = result[i].ip
-            group.enter()
-            queue.async {
-                let n = hostname(for: ip)
-                if let n {
-                    lock.lock(); names[i] = n; lock.unlock()
-                }
-                group.leave()
-            }
+    /// Имена для найденных хостов: Bonjour (приоритет) + обратный DNS для безымянных.
+    /// Возвращает карту MAC → имя.
+    public func resolveNames(for hosts: [Host], duration: TimeInterval = 2.5) -> [MACAddress: String] {
+        let bonjour = resolveDeviceNames(duration: duration)
+        var names = [MACAddress: String]()
+        for h in hosts {
+            if let bn = bonjour[h.ip.description] { names[h.mac] = bn }
         }
-        _ = group.wait(timeout: .now() + 2.5)
-        lock.lock()
-        let resolved = names
-        lock.unlock()
-        for (i, n) in resolved { result[i].name = n }
-        return result
+        let unnamed = hosts.filter { names[$0.mac] == nil }
+        if !unnamed.isEmpty {
+            let queue = DispatchQueue(label: "netspoof.resolve", attributes: .concurrent)
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var resolved = [MACAddress: String]()
+            for h in unnamed {
+                group.enter()
+                queue.async {
+                    let n = hostname(for: h.ip)
+                    if let n { lock.lock(); resolved[h.mac] = n; lock.unlock() }
+                    group.leave()
+                }
+            }
+            _ = group.wait(timeout: .now() + 1.5)
+            lock.lock(); let add = resolved; lock.unlock()
+            for (m, n) in add { names[m] = n }
+        }
+        return names
+    }
+
+    /// Полный скан (для CLI): обнаружение + имена.
+    public func scan(duration: TimeInterval = 2.5) -> [Host] {
+        var hosts = discoverHosts(duration: duration)
+        let names = resolveNames(for: hosts, duration: duration)
+        for i in hosts.indices {
+            if let n = names[hosts[i].mac] { hosts[i].name = n }
+        }
+        return hosts
     }
 
     /// Разрешить MAC по IP: шлём request и ждём reply.

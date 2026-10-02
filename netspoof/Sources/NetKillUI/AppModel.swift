@@ -9,6 +9,7 @@ struct Device: Identifiable, Hashable {
     var name: String?
     var isGateway: Bool
     var active: Bool
+    var isSelf: Bool = false
     var id: MACAddress { mac }
 }
 
@@ -24,10 +25,18 @@ final class AppModel: ObservableObject {
     @Published var statusLine = "не подключено"
     @Published var showConsent = false
     @Published var errorMessage: String?
+    @Published var darkTheme: Bool = (UserDefaults.standard.object(forKey: "nku.dark") as? Bool) ?? true
 
     private let client = SocketClient()
     private let socketPath = "/tmp/netkillui.sock"
     private var activeMacs = Set<MACAddress>()
+    private var selfMAC: MACAddress?
+    private var selfIP: IPv4Address?
+
+    func toggleTheme() {
+        darkTheme.toggle()
+        UserDefaults.standard.set(darkTheme, forKey: "nku.dark")
+    }
 
     private let consentKey = "nku.consent.accepted"
     private var consentAccepted: Bool {
@@ -125,7 +134,7 @@ final class AppModel: ObservableObject {
     }
 
     func toggle(_ device: Device) {
-        guard !device.isGateway else { return }
+        guard !device.isGateway, !device.isSelf else { return }
         setActive(!device.active, for: [device.mac])
     }
 
@@ -133,7 +142,7 @@ final class AppModel: ObservableObject {
     func stopSelected() { setActive(false, for: selectableMacs(in: selection)) }
 
     func spoofAll() {
-        setActive(true, for: devices.filter { !$0.isGateway }.map(\.mac))
+        setActive(true, for: devices.filter { !$0.isGateway && !$0.isSelf }.map(\.mac))
     }
 
     func stopAll() {
@@ -148,7 +157,7 @@ final class AppModel: ObservableObject {
     // MARK: Внутреннее
 
     private func selectableMacs(in set: Set<MACAddress>) -> [MACAddress] {
-        devices.filter { set.contains($0.mac) && !$0.isGateway }.map(\.mac)
+        devices.filter { set.contains($0.mac) && !$0.isGateway && !$0.isSelf }.map(\.mac)
     }
 
     private func setActive(_ on: Bool, for macs: [MACAddress]) {
@@ -171,12 +180,15 @@ final class AppModel: ObservableObject {
         case "ready":
             gateway = obj["gateway"] as? String ?? gateway
             if let name = obj["iface"] as? String { interface = name }
+            if let m = obj["mac"] as? String { selfMAC = MACAddress(m) }
+            if let ip = obj["ip"] as? String { selfIP = IPv4Address(ip) }
 
         case "devices":
             if let list = obj["list"] as? [[String: String]] {
                 var ds = list.compactMap { Device(fromJSON: $0) }
                 for i in ds.indices {
                     if ds[i].ip.description == gateway { ds[i].isGateway = true }
+                    if ds[i].mac == selfMAC || ds[i].ip == selfIP { ds[i].isSelf = true }
                     ds[i].active = activeMacs.contains(ds[i].mac)
                 }
                 ds.sort { $0.ip.hostOrder < $1.ip.hostOrder }
@@ -184,6 +196,16 @@ final class AppModel: ObservableObject {
             }
             scanning = false
             updateStatusLine()
+
+        case "deviceNames":
+            if let pairs = obj["names"] as? [[String: String]] {
+                for p in pairs {
+                    if let macS = p["mac"], let name = p["name"], let mac = MACAddress(macS),
+                       let idx = devices.firstIndex(where: { $0.mac == mac }) {
+                        devices[idx].name = name
+                    }
+                }
+            }
 
         case "status":
             let targets = obj["targets"] as? [[String: String]] ?? []

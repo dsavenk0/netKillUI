@@ -36,3 +36,6 @@ Icon?
 # ---- Misc ----
 *.log
 *.tmp
+
+# Собранный бандл
+/NetKillUI.app/

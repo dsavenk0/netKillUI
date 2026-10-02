@@ -89,16 +89,21 @@ private func handle(_ cmd: [String: Any], client: Int32,
     }
     switch c {
     case "scan":
-        print("cmd scan: сканирую подсеть…")
-        let hosts = engine.spoofer.scan()
-        print("cmd scan: найдено \(hosts.count) хостов, отправляю devices")
+        // Прогрессивно: сперва быстрый ARP-список, затем имена отдельным событием.
+        print("cmd scan: обнаружение хостов…")
+        let hosts = engine.spoofer.discoverHosts()
         for h in hosts { engine.observe(h) }
-        let list = hosts.map { h -> [String: String] in
-            var d = ["ip": h.ip.description, "mac": h.mac.description, "vendor": h.vendor]
-            if let n = h.name { d["name"] = n }
-            return d
+        let list = hosts.map { h in
+            ["ip": h.ip.description, "mac": h.mac.description, "vendor": h.vendor]
         }
         sendJSON(client, ["event": "devices", "list": list])
+        print("cmd scan: \(hosts.count) хостов, резолвлю имена…")
+        let names = engine.spoofer.resolveNames(for: hosts)
+        if !names.isEmpty {
+            let pairs = names.map { ["mac": $0.key.description, "name": $0.value] }
+            sendJSON(client, ["event": "deviceNames", "names": pairs])
+        }
+        print("cmd scan: имена отправлены (\(names.count))")
 
     case "start":
         for m in macList(cmd) { engine.start(m) }

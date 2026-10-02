@@ -20,6 +20,12 @@ public func gatewayGuess(for iface: InterfaceInfo) -> IPv4Address? {
     return IPv4Address(hostOrder: net | 1)
 }
 
+/// Завершить все другие процессы netspoof (кроме себя) — единственный экземпляр
+/// демона. Демон root, поэтому может убрать и прежние root-демоны-сироты.
+public func killOtherNetspoofInstances() {
+    cbpf_kill_other_netspoof()
+}
+
 /// Чтение/запись net.inet.ip.forwarding через sysctl.
 public func getIPForwarding() -> Int32 {
     var value: Int32 = 0

@@ -13,13 +13,10 @@ enum Elevator {
     /// ошибки (например, отмену диалога пароля).
     @discardableResult
     static func launchServe(binary: String, iface: String, socketPath: String, owner: String) -> String? {
-        // Сначала убить любой уже запущенный serve, затем поднять один свежий.
-        // Важно: pkill по ИМЕНИ процесса (-x netspoof), а НЕ по строке (-f) —
-        // иначе паттерн совпал бы с самим запускающим шеллом (в его argv есть
-        // "netspoof serve") и убил бы его (osascript код 15).
-        // Без nohup (под osascript нет tty) — демон сам игнорирует SIGHUP.
-        let cmd = "pkill -x netspoof 2>/dev/null; sleep 0.2; "
-            + "'\(binary)' serve -i \(iface) --socket '\(socketPath)' --owner \(owner)"
+        // Демон сам чистит прежние экземпляры при старте (killOtherNetspoofInstances,
+        // по PID — без pkill и само-ловушек). Без nohup (под osascript нет tty) —
+        // демон сам игнорирует SIGHUP; stdio в файл/-devnull, & — в фон.
+        let cmd = "'\(binary)' serve -i \(iface) --socket '\(socketPath)' --owner \(owner)"
             + " </dev/null >/tmp/netkillui-serve.log 2>&1 &"
         let apple = "do shell script \"\(cmd)\" with administrator privileges"
 

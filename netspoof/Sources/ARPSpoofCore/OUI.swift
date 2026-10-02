@@ -48,4 +48,27 @@ let ouiTable: [String: String] = [
     "7C:1E:52": "Microsoft", "AC:9B:0A": "Sony", "FC:F1:52": "Sony",
     "00:1E:75": "LG Electronics", "A8:16:B2": "LG Electronics",
     "48:3B:38": "Huawei", "00:E0:FC": "Huawei", "20:F3:A3": "Huawei",
+    // Роутеры / сетевое
+    "DC:2C:6E": "MikroTik", "64:D1:54": "MikroTik", "48:8F:5A": "MikroTik",
+    "6C:3B:6B": "MikroTik", "CC:2D:E0": "MikroTik", "74:4D:28": "MikroTik",
+    "E4:8D:8C": "MikroTik", "B8:69:F4": "MikroTik", "2C:C8:1B": "MikroTik",
+    "50:FF:20": "Keenetic",
+    "04:18:D6": "Ubiquiti", "24:A4:3C": "Ubiquiti", "44:D9:E7": "Ubiquiti",
+    "78:8A:20": "Ubiquiti", "FC:EC:DA": "Ubiquiti", "DC:9F:DB": "Ubiquiti",
+    "68:D7:9A": "Ubiquiti", "E0:63:DA": "Ubiquiti", "74:AC:B9": "Ubiquiti",
+    "2C:56:DC": "ASUSTek", "50:46:5D": "ASUSTek", "AC:22:0B": "ASUSTek",
+    "04:D4:C4": "ASUSTek", "38:D5:47": "ASUSTek", "1C:87:2C": "ASUSTek",
+    "1C:7E:E5": "D-Link", "34:08:04": "D-Link", "00:1E:58": "D-Link",
+    "C8:BE:19": "D-Link", "78:54:2E": "D-Link",
+    "5C:E2:8C": "Zyxel", "B0:B2:DC": "Zyxel", "A0:E4:CB": "Zyxel", "00:19:CB": "Zyxel",
+    // Чипы / виртуализация
+    "00:E0:4C": "Realtek", "52:54:00": "Realtek/QEMU", "00:10:18": "Broadcom",
+    // Медиа / умный дом
+    "00:0E:58": "Sonos", "34:7E:5C": "Sonos", "48:A6:B8": "Sonos",
+    "94:9F:3E": "Sonos", "5C:AA:FD": "Sonos", "B8:E9:37": "Sonos",
+    "DC:3A:5E": "Roku", "B0:A7:37": "Roku", "CC:6D:A0": "Roku", "D8:31:34": "Roku",
+    "00:04:4B": "NVIDIA", "48:B0:2D": "NVIDIA",
+    "1C:F2:9A": "Google", "30:FD:38": "Google", "20:DF:B9": "Google",
+    "68:37:E9": "Amazon", "0C:47:C9": "Amazon", "FC:65:DE": "Amazon", "74:C2:46": "Amazon",
+    "C8:19:F7": "Samsung Electronics", "E8:50:8B": "Samsung Electronics",
 ]

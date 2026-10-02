@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
@@ -14,5 +14,8 @@ let package = Package(
         // и общается с ним по unix-сокету.
         .executableTarget(name: "NetKillUI", dependencies: ["ARPSpoofCore"]),
         .testTarget(name: "ARPSpoofCoreTests", dependencies: ["ARPSpoofCore"]),
-    ]
+    ],
+    // tools-version 6.0 нужен для корректной линковки swift-testing (Testing),
+    // но язык держим в режиме 5 — строгий параллелизм пока не включаем.
+    swiftLanguageModes: [.v5]
 )
