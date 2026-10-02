@@ -1,0 +1,48 @@
+name: Swift
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    name: Build & test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use latest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        working-directory: netspoof
+        run: swift build
+
+      - name: Test
+        working-directory: netspoof
+        run: swift test
+
+  package:
+    name: Package NetKillUI.app
+    runs-on: macos-15
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use latest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+
+      - name: Build app bundle
+        run: ./build-app.sh
+
+      - name: Upload NetKillUI.app
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetKillUI.app
+          path: NetKillUI.app
+          if-no-files-found: error
