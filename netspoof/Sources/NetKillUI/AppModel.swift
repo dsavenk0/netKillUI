@@ -54,6 +54,11 @@ final class AppModel: ObservableObject {
     private var selfMAC: MACAddress?
     private var selfIP: IPv4Address?
 
+    // Reconnect: отличаем намеренное отключение от падения демона.
+    private static let maxAutoReconnects = 1
+    private var intentionalDisconnect = false
+    private var reconnectAttempts = 0
+
     // Кеш устройств + постоянный блок-лист, РАЗДЕЛЁННЫЕ ПО СЕТЯМ (ключ — MAC шлюза,
     // стабильный отпечаток сети): устройства и блокировки разных сетей не смешиваются.
     private var networkKey = ""
@@ -130,12 +135,25 @@ final class AppModel: ObservableObject {
 
     func connect() {
         guard !connected else { return }
+        intentionalDisconnect = false
         statusLine = "запуск движка (нужен пароль)…"
         client.onEvent = { [weak self] in self?.handle($0) }
         client.onClose = { [weak self] in
-            self?.connected = false
-            self?.statusLine = "движок отключён"
-            self?.stopAutoScan()
+            guard let self else { return }
+            self.connected = false
+            self.stopAutoScan()
+            if self.intentionalDisconnect {
+                self.statusLine = "движок отключён"
+            } else if self.reconnectAttempts < Self.maxAutoReconnects {
+                // Демон упал, а не был остановлен нами → одна авто-попытка поднять заново.
+                self.reconnectAttempts += 1
+                self.statusLine = "движок упал — переподключаюсь…"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.connect()
+                }
+            } else {
+                self.statusLine = "движок отключён — нажмите «Start engine»"
+            }
         }
 
         let binary = Elevator.serveBinaryPath()
@@ -162,6 +180,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async {
                 self?.connected = ok
                 if ok {
+                    self?.reconnectAttempts = 0   // успех — обнуляем счётчик авто-попыток
                     self?.statusLine = "подключено"
                     self?.client.send(["cmd": "mode", "cut": self?.cutMode ?? true])
                     self?.client.send(["cmd": "status"])
@@ -186,6 +205,7 @@ final class AppModel: ObservableObject {
     }
 
     func disconnect() {
+        intentionalDisconnect = true   // не пытаться авто-переподключаться
         client.send(["cmd": "stopAll"])
         client.close()
         connected = false

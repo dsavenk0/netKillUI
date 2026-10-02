@@ -1,0 +1,38 @@
+name: Release
+
+# Релиз по тегу vX.Y.Z: прогоняем тесты, собираем NetKillUI.app, кладём zip в
+# GitHub Release. Создать релиз: `git tag v0.2.0 && git push origin v0.2.0`.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # нужно, чтобы создать Release и приложить артефакт
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use latest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+
+      - name: Test
+        working-directory: netspoof
+        run: swift test
+
+      - name: Build app bundle
+        run: ./build-app.sh
+
+      - name: Zip NetKillUI.app
+        run: ditto -c -k --keepParent NetKillUI.app NetKillUI.zip
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: NetKillUI.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true

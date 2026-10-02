@@ -17,10 +17,14 @@ enum Elevator {
         // Демон сам чистит прежние экземпляры при старте (killOtherNetspoofInstances,
         // по PID — без pkill и само-ловушек). Без nohup (под osascript нет tty) —
         // демон сам игнорирует SIGHUP; stdio в файл/-devnull, & — в фон.
+        // Все переменные части (путь к бинарю и сокету, iface, owner) экранируем
+        // для shell (одинарные кавычки), а всю команду — ещё и для строки AppleScript,
+        // иначе путь с ' или " ломал бы `do shell script`.
         let maskFlag = maskMAC ? " --mask-mac" : ""
-        let cmd = "'\(binary)' serve -i \(iface) --socket '\(socketPath)' --owner \(owner)\(maskFlag)"
+        let cmd = "\(shellQuote(binary)) serve -i \(shellQuote(iface))"
+            + " --socket \(shellQuote(socketPath)) --owner \(shellQuote(owner))\(maskFlag)"
             + " </dev/null >/tmp/netkillui-serve.log 2>&1 &"
-        let apple = "do shell script \"\(cmd)\" with administrator privileges"
+        let apple = "do shell script \"\(appleScriptEscape(cmd))\" with administrator privileges"
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -38,5 +42,17 @@ enum Elevator {
             return msg.isEmpty ? "osascript завершился с кодом \(p.terminationStatus)" : msg
         }
         return nil
+    }
+
+    /// Обернуть в одинарные кавычки для shell: внутренние ' → '\'' (закрыть,
+    /// экранированная кавычка, открыть снова).
+    private static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Экранировать для двойных кавычек строкового литерала AppleScript.
+    private static func appleScriptEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

@@ -104,6 +104,32 @@ Options:
 
 ## How it works
 
+### Architecture
+
+```mermaid
+flowchart LR
+    subgraph user["User space — unprivileged"]
+        GUI["NetKillUI (SwiftUI)<br/>devices · blocking · radar"]
+    end
+    subgraph daemon["Root daemon — netspoof serve"]
+        ENG["SpoofEngine<br/>multi-target · spoof detect"]
+        MET["TrafficMeter"]
+        PIN["ARPPin<br/>self-defense"]
+        BPF["BPFDevice<br/>/dev/bpf"]
+    end
+    GUI -.->|"osascript admin prompt (once)"| daemon
+    GUI <-->|"unix socket · JSON lines<br/>scan / block / monitor / alerts"| ENG
+    ENG --> BPF
+    MET --> BPF
+    PIN -->|"arp -s pin"| ARPC["our ARP cache"]
+    BPF <-->|"ARP inject / capture"| LAN(("LAN<br/>gateway · devices"))
+```
+
+Only the root daemon touches `/dev/bpf` and runs the ARP loop; the GUI stays
+unprivileged (details below).
+
+### Modules
+
 ```
 CBPF (C shim)       BPF ioctls (BIOCSETIF/BIOCIMMEDIATE/BIOCSETF…), default
                     gateway + ARP cache via PF_ROUTE, MAC get/set, process control.

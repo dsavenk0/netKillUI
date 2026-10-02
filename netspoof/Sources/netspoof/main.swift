@@ -287,6 +287,9 @@ case "serve":
         print("mask: восстанавливаю оригинальный MAC \(r.mac)…")
         _ = MACMasker.apply(r.iface, r.mac)
     }
+    if bpf.sendFailures > 0 {
+        print("serve: сбоев отправки BPF за сессию: \(bpf.sendFailures)")
+    }
     print("\nserve: остановлен, ARP-кэши восстановлены.")
 
 default:

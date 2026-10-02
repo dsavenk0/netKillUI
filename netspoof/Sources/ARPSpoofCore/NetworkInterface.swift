@@ -6,6 +6,13 @@ public struct InterfaceInfo {
     public let mac: MACAddress
     public let ip: IPv4Address
     public let netmask: IPv4Address?
+
+    public init(name: String, mac: MACAddress, ip: IPv4Address, netmask: IPv4Address?) {
+        self.name = name
+        self.mac = mac
+        self.ip = ip
+        self.netmask = netmask
+    }
 }
 
 public enum NetworkError: Error, CustomStringConvertible {

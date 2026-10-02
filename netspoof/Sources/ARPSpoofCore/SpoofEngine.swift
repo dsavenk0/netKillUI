@@ -4,7 +4,7 @@ import Foundation
 /// (стабилен), текущий IP держится в связке `bindings` и обновляется из ARP.
 /// Чистая логика без сокетов — переиспользуется CLI `serve` и будущим GUI-хелпером.
 public final class SpoofEngine {
-    public let spoofer: ARPSpoofer
+    public let spoofer: any ARPSpoofing
     public let gatewayIP: IPv4Address
     public let gatewayMAC: MACAddress
     public var oneway: Bool
@@ -19,7 +19,7 @@ public final class SpoofEngine {
     public var onSpoofDetected: ((MACAddress, IPv4Address) -> Void)?
     private var reportedSpoofers = Set<MACAddress>()
 
-    public init(spoofer: ARPSpoofer, gatewayIP: IPv4Address, gatewayMAC: MACAddress, oneway: Bool) {
+    public init(spoofer: any ARPSpoofing, gatewayIP: IPv4Address, gatewayMAC: MACAddress, oneway: Bool) {
         self.spoofer = spoofer
         self.gatewayIP = gatewayIP
         self.gatewayMAC = gatewayMAC

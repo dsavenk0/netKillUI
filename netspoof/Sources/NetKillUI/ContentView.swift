@@ -618,29 +618,40 @@ private struct ConsentView: View {
     @EnvironmentObject var model: AppModel
     @State private var agreed = false
 
+    // Язык предупреждения — по системной локали (русский для ru, иначе английский).
+    private var ru: Bool {
+        (Locale.current.language.languageCode?.identifier ?? "en") == "ru"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
                 Text("⚠").font(.system(size: 22)).foregroundColor(.nkAccent)
-                Text("Авторизованное использование")
+                Text(ru ? "Авторизованное использование" : "Authorized use only")
                     .font(.system(size: 17, weight: .semibold)).foregroundColor(.nkFG)
             }
-            Text("netKillUI выполняет ARP-спуфинг — перехват и разрыв трафика в локальной сети. "
-                 + "Используйте его только в сети, которой владеете, или имея письменное разрешение "
-                 + "владельца. Применение к чужим устройствам без согласия незаконно.")
+            Text(ru
+                 ? "netKillUI выполняет ARP-спуфинг — перехват и разрыв трафика в локальной сети. "
+                   + "Используйте его только в сети, которой владеете, или имея письменное разрешение "
+                   + "владельца. Применение к чужим устройствам без согласия незаконно."
+                 : "netKillUI performs ARP spoofing — it intercepts and disrupts traffic on a local "
+                   + "network. Use it only on a network you own or have written permission to test. "
+                   + "Using it against devices without consent is illegal.")
                 .font(.system(size: 13)).foregroundColor(.nkDim)
                 .fixedSize(horizontal: false, vertical: true)
 
             Toggle(isOn: $agreed) {
-                Text("Подтверждаю: только своя или разрешённая сеть, не в вредоносных целях.")
+                Text(ru
+                     ? "Подтверждаю: только своя или разрешённая сеть, не в вредоносных целях."
+                     : "I confirm: only my own or an authorized network, not for malicious purposes.")
                     .font(.system(size: 12.5)).foregroundColor(.nkFG)
             }
             .toggleStyle(.checkbox)
 
             HStack {
                 Spacer()
-                Button("Отмена") { model.declineConsent() }
-                Button("Согласен") { model.acceptConsent() }
+                Button(ru ? "Отмена" : "Cancel") { model.declineConsent() }
+                Button(ru ? "Согласен" : "I agree") { model.acceptConsent() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!agreed)
             }

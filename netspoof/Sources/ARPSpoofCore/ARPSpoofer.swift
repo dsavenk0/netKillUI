@@ -11,7 +11,7 @@ public enum SpoofError: Error, CustomStringConvertible {
     }
 }
 
-public final class ARPSpoofer {
+public final class ARPSpoofer: ARPSpoofing {
     public let iface: InterfaceInfo
     public let bpf: BPFDevice
 

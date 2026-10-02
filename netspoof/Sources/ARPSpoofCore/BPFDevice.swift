@@ -59,11 +59,26 @@ public final class BPFDevice {
         close(fd)
     }
 
+    /// Число неудачных send'ов (для диагностики — многие вызовы идут через try?).
+    public private(set) var sendFailures = 0
+    private var warnedOnceAboutSend = false
+
     public func send(_ frame: [UInt8]) throws {
         let n = frame.withUnsafeBytes { raw in
             write(fd, raw.baseAddress, raw.count)
         }
-        if n < 0 { throw BPFError.writeFailed(errno) }
+        if n < 0 {
+            let e = errno
+            sendFailures += 1
+            // Горячий путь (травля) шлёт через try? — не спамим, но первый сбой
+            // громко логируем с errno, чтобы проблема не была невидимой.
+            if !warnedOnceAboutSend {
+                warnedOnceAboutSend = true
+                FileHandle.standardError.write(Data(
+                    "bpf: ошибка отправки кадра (errno=\(e)); дальнейшие сбои считаются молча\n".utf8))
+            }
+            throw BPFError.writeFailed(e)
+        }
     }
 
     /// Прочитать доступные кадры, ожидая не дольше timeoutMS.

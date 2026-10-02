@@ -102,6 +102,32 @@ sudo .build/release/netspoof serve --socket <path>    # JSON-демон для G
 
 ## Как это устроено
 
+### Архитектура
+
+```mermaid
+flowchart LR
+    subgraph user["Пользователь — без прав"]
+        GUI["NetKillUI (SwiftUI)<br/>устройства · блок · радар"]
+    end
+    subgraph daemon["Root-демон — netspoof serve"]
+        ENG["SpoofEngine<br/>мультицель · детект"]
+        MET["TrafficMeter"]
+        PIN["ARPPin<br/>защита себя"]
+        BPF["BPFDevice<br/>/dev/bpf"]
+    end
+    GUI -.->|"osascript, диалог админа (однократно)"| daemon
+    GUI <-->|"unix-сокет · JSON построчно<br/>scan / block / monitor / alerts"| ENG
+    ENG --> BPF
+    MET --> BPF
+    PIN -->|"arp -s пин"| ARPC["наш ARP-кэш"]
+    BPF <-->|"ARP inject / capture"| LAN(("Сеть<br/>шлюз · устройства"))
+```
+
+Только root-демон трогает `/dev/bpf` и крутит ARP-цикл; GUI остаётся без прав
+(подробности ниже).
+
+### Модули
+
 ```
 CBPF (C-shim)        ioctl'ы BPF (BIOCSETIF/BIOCIMMEDIATE/BIOCSETF…), шлюз и
                      ARP-кэш через PF_ROUTE, чтение/смена MAC, контроль процессов.
