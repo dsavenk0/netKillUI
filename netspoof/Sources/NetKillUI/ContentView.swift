@@ -598,7 +598,7 @@ private struct TrafficRadar: View {
                 // Луч развёртки с затухающим шлейфом.
                 let sweep = (t.truncatingRemainder(dividingBy: sweepPeriod) / sweepPeriod) * 2 * .pi
                 func pt(_ a: Double, _ r: CGFloat) -> CGPoint {
-                    CGPoint(x: c.x + cos(a) * r, y: c.y + sin(a) * r)
+                    CGPoint(x: c.x + CGFloat(cos(a)) * r, y: c.y + CGFloat(sin(a)) * r)
                 }
                 for i in 0..<28 {
                     let a = sweep - Double(i) * 0.028
