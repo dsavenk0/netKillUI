@@ -39,3 +39,10 @@ Icon?
 
 # Собранный бандл
 /NetKillUI.app/
+
+# ---- ESP32 прошивка — отдельный репозиторий (github.com/dsavenk0/netKillUI-esp32) ----
+esp32/
+
+# ---- IDE / machine-specific ----
+.vscode/
+.clangd
